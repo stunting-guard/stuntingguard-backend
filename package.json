@@ -1,0 +1,37 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "RESTful API backend untuk **StuntingGuard Desa** (Sistem Terpadu Penanganan Stunting & Bantuan Sosial Desa). Dibuat menggunakan Node.js dan Express.js untuk melayani modul Posyandu (Kader), Dasbor Eksekutif (Aparatur Desa), dan Konsol Pengelola Data (Admin & AI).",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "postinstall": "prisma skills sync || exit 0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stunting-guard/stuntingguard-backend.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/stunting-guard/stuntingguard-backend/issues"
+  },
+  "homepage": "https://github.com/stunting-guard/stuntingguard-backend#readme",
+  "dependencies": {
+    "@prisma/client": "^7.10.1",
+    "axios": "^1.21.0",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.24.6"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14",
+    "prisma": "^8.0.0-rc.29"
+  }
+}

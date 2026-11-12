@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# Prisma
+*.sqlite3
+*.db
+
+# ML & Logs
+logs/
+*.log
+*.csv
+*.xlsx
+__pycache__/
+
+# AI Agents & IDE Workspace (Agar tidak konflik saat push ke tim)
+.cursor/
+.claude/
+.devin/
+.agents/
+.vscode/
+.DS_Store
