@@ -1,6 +1,8 @@
 const ExcelJS = require("exceljs");
 const PDFDocument = require("pdfkit");
 const prisma = require("../config/prisma");
+const { parseDateRange } = require("../utils/dateRange");
+const { parseZonaFilter } = require("../utils/zonaFilter");
 
 function toTitleCaseRisk(statusRisiko) {
   if (statusRisiko === "TINGGI") return "Tinggi";
@@ -16,6 +18,9 @@ async function exportLaporan(req, res, next) {
       rw = "",
       risiko = "",
       search = "",
+      start_date = "",
+      end_date = "",
+      zona: zonaQuery = "",
     } = req.query;
 
     const lowerFormat = String(format).toLowerCase();
@@ -26,13 +31,49 @@ async function exportLaporan(req, res, next) {
       });
     }
 
-    const where = {};
+    const dateRange = parseDateRange(start_date, end_date);
+    if (dateRange.error) {
+      return res.status(400).json({
+        success: false,
+        message: dateRange.error,
+      });
+    }
+
+    const zonaFilter = parseZonaFilter(zonaQuery);
+    if (zonaFilter.error) {
+      return res.status(400).json({
+        success: false,
+        message: zonaFilter.error,
+      });
+    }
+
+    const where = dateRange.filter ? { createdAt: dateRange.filter } : {};
+    const dusunWhere = {};
+    if (zonaFilter.zona) {
+      dusunWhere.zona = zonaFilter.zona;
+      where.statusRisiko = zonaFilter.statusRisiko;
+    }
     if (rw && !rw.toLowerCase().includes("semua")) {
-      where.dusun = { rw: String(rw).trim() };
+      dusunWhere.rw = String(rw).trim();
+    }
+    if (Object.keys(dusunWhere).length > 0) {
+      where.dusun = dusunWhere;
+    }
+    const dusunListWhere = { ...dusunWhere };
+    if (zonaFilter.statusRisiko) {
+      dusunListWhere.skrining = {
+        some: { statusRisiko: zonaFilter.statusRisiko },
+      };
     }
     if (risiko && !risiko.toLowerCase().includes("semua")) {
       const rUpper = risiko.toUpperCase();
       if (["TINGGI", "SEDANG", "RENDAH"].includes(rUpper)) {
+        if (zonaFilter.statusRisiko && rUpper !== zonaFilter.statusRisiko) {
+          return res.status(400).json({
+            success: false,
+            message: "Filter risiko tidak sesuai dengan zona yang dipilih.",
+          });
+        }
         where.statusRisiko = rUpper;
       }
     }
@@ -52,6 +93,7 @@ async function exportLaporan(req, res, next) {
         orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       }),
       prisma.dusun.findMany({
+        where: dusunListWhere,
         orderBy: { id: "asc" },
       }),
     ]);

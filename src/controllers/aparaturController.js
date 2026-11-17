@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { parseZonaFilter } = require("../utils/zonaFilter");
 
 function toTitleCaseZona(zona) {
   if (!zona) return "Hijau";
@@ -96,6 +97,13 @@ async function getDashboardAparatur(req, res, next) {
 async function getDataKeluargaAparatur(req, res, next) {
   try {
     const { dusun: dusunQuery, zona: zonaQuery, search = "" } = req.query;
+    const zonaFilter = parseZonaFilter(zonaQuery);
+    if (zonaFilter.error) {
+      return res.status(400).json({
+        success: false,
+        message: zonaFilter.error,
+      });
+    }
 
     const whereDusun = {};
     if (dusunQuery && !dusunQuery.toLowerCase().includes("semua")) {
@@ -104,8 +112,8 @@ async function getDataKeluargaAparatur(req, res, next) {
         { namaSingkat: { contains: dusunQuery } },
       ];
     }
-    if (zonaQuery && !zonaQuery.toLowerCase().includes("semua")) {
-      whereDusun.zona = zonaQuery.toUpperCase();
+    if (zonaFilter.zona) {
+      whereDusun.zona = zonaFilter.zona;
     }
 
     const dusunList = await prisma.dusun.findMany({
@@ -116,17 +124,25 @@ async function getDataKeluargaAparatur(req, res, next) {
       },
     });
 
+    const searchTerm = String(search).trim().toLowerCase();
+    const filteredSkrining = [];
     const dusunRecap = dusunList.map((d) => {
       let skrining = d.skrining;
-      if (search.trim()) {
-        const s = search.toLowerCase();
+      if (zonaFilter.statusRisiko) {
         skrining = skrining.filter(
-          (k) =>
-            (k.kepalaKeluarga && k.kepalaKeluarga.toLowerCase().includes(s)) ||
-            (k.namaBalita && k.namaBalita.toLowerCase().includes(s)) ||
-            (k.kodeKeluarga && k.kodeKeluarga.toLowerCase().includes(s))
+          (row) => row.statusRisiko === zonaFilter.statusRisiko
         );
       }
+      if (searchTerm) {
+        skrining = skrining.filter(
+          (k) =>
+            (k.kepalaKeluarga &&
+              k.kepalaKeluarga.toLowerCase().includes(searchTerm)) ||
+            (k.namaBalita && k.namaBalita.toLowerCase().includes(searchTerm)) ||
+            (k.kodeKeluarga && k.kodeKeluarga.toLowerCase().includes(searchTerm))
+        );
+      }
+      filteredSkrining.push(...skrining);
 
       const tinggi = skrining.filter((s) => s.statusRisiko === "TINGGI").length;
       const sedang = skrining.filter((s) => s.statusRisiko === "SEDANG").length;
@@ -142,17 +158,9 @@ async function getDataKeluargaAparatur(req, res, next) {
         rendah,
       };
     });
-
-    const allSkrining = await prisma.skriningStunting.findMany({
-      select: {
-        pendapatan: true,
-        kondisiSanitasi: true,
-        sumberAir: true,
-        pendidikanIbu: true,
-        riwayatKehamilan: true,
-        faktorDetail: true,
-      },
-    });
+    const filteredDusunRecap = zonaFilter.statusRisiko
+      ? dusunRecap.filter((dusun) => dusun.total > 0)
+      : dusunRecap;
 
     // Hitung persentase faktor determinan desa
     let totalScore = 0;
@@ -164,7 +172,7 @@ async function getDataKeluargaAparatur(req, res, next) {
       kek: 0,
     };
 
-    allSkrining.forEach((row) => {
+    filteredSkrining.forEach((row) => {
       if (row.pendapatan < 2000000) {
         factorCounts.pendapatan += 3;
         totalScore += 3;
@@ -188,32 +196,32 @@ async function getDataKeluargaAparatur(req, res, next) {
     });
 
     const calcPercent = (val) =>
-      totalScore > 0 ? Math.round((val / totalScore) * 100) : 20;
+      totalScore > 0 ? Math.round((val / totalScore) * 100) : 0;
 
     const faktor = [
       {
         id: "pendapatan",
         judul: "Pendapatan & Ketahanan Pangan",
         deskripsi: "Daya beli pangan hewani dan gizi seimbang terbatas",
-        persen: calcPercent(factorCounts.pendapatan) || 38,
+        persen: calcPercent(factorCounts.pendapatan),
       },
       {
         id: "sanitasi",
         judul: "Fasilitas Sanitasi & MCK",
         deskripsi: "Penggunaan jamban tidak layak dan MCK komunal minim standar",
-        persen: calcPercent(factorCounts.sanitasi) || 28,
+        persen: calcPercent(factorCounts.sanitasi),
       },
       {
         id: "air",
         judul: "Akses Air Minum Bersih",
         deskripsi: "Sumber air sumur gali terbuka dan belum terlindungi optimal",
-        persen: calcPercent(factorCounts.air) || 20,
+        persen: calcPercent(factorCounts.air),
       },
       {
         id: "pendidikan",
         judul: "Literasi Pola Asuh & Gizi",
         deskripsi: "Tingkat pemahaman ibu terkait MPASI bergizi seimbang",
-        persen: calcPercent(factorCounts.pendidikan) || 14,
+        persen: calcPercent(factorCounts.pendidikan),
       },
     ];
 
@@ -221,7 +229,7 @@ async function getDataKeluargaAparatur(req, res, next) {
       success: true,
       message: "Ringkasan data keluarga berhasil diambil",
       data: {
-        dusun: dusunRecap,
+        dusun: filteredDusunRecap,
         faktor,
       },
     });

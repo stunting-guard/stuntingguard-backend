@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { parseDateRange } = require("../utils/dateRange");
 
 const BULAN_MAP = {
   januari: 0,
@@ -164,6 +165,8 @@ async function getDashboard(req, res, next) {
       periode = "",
       bulan = "",
       tahun = "",
+      start_date = "",
+      end_date = "",
       page = "1",
       limit = "5",
     } = req.query;
@@ -212,36 +215,29 @@ async function getDashboard(req, res, next) {
         : {}),
     };
 
-    const dateRange = parseDateFilter({ bulan, tahun, periode });
-    let skriningRecords = [];
-
-    if (dateRange) {
-      skriningRecords = await prisma.skriningStunting.findMany({
-        where: {
-          ...baseWhere,
-          createdAt: {
-            gte: dateRange.start,
-            lt: dateRange.end,
-          },
-        },
-        include: { dusun: true },
-        orderBy: { createdAt: "desc" },
-      });
-
-      if (skriningRecords.length === 0 && periode && !bulan && !tahun) {
-        skriningRecords = await prisma.skriningStunting.findMany({
-          where: baseWhere,
-          include: { dusun: true },
-          orderBy: { createdAt: "desc" },
-        });
-      }
-    } else {
-      skriningRecords = await prisma.skriningStunting.findMany({
-        where: baseWhere,
-        include: { dusun: true },
-        orderBy: { createdAt: "desc" },
+    const requestedDateRange = parseDateRange(start_date, end_date);
+    if (requestedDateRange.error) {
+      return res.status(400).json({
+        success: false,
+        message: requestedDateRange.error,
       });
     }
+
+    const legacyRange = requestedDateRange.filter
+      ? null
+      : parseDateFilter({ bulan, tahun, periode });
+    const createdAtFilter =
+      requestedDateRange.filter ||
+      (legacyRange ? { gte: legacyRange.start, lt: legacyRange.end } : null);
+
+    const skriningRecords = await prisma.skriningStunting.findMany({
+      where: {
+        ...baseWhere,
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+      include: { dusun: true },
+      orderBy: { createdAt: "desc" },
+    });
 
     const totalKK = skriningRecords.length;
     const tinggi = skriningRecords.filter(
