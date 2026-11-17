@@ -10,6 +10,7 @@ const prediksiRoutes = require("./src/routes/prediksiRoutes");
 const riwayatRoutes = require("./src/routes/riwayatRoutes");
 const aparaturRoutes = require("./src/routes/aparaturRoutes");
 const laporanRoutes = require("./src/routes/laporanRoutes");
+const adminRoutes = require("./src/routes/adminRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -52,9 +53,7 @@ app.use("/api/prediksi", prediksiRoutes);
 app.use("/api/riwayat", riwayatRoutes);
 app.use("/api/aparatur", aparaturRoutes);
 app.use("/api/laporan", laporanRoutes);
-
-// Placeholder route untuk task berikutnya:
-// app.use("/api/admin", adminRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
