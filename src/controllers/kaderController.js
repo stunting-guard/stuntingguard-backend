@@ -228,8 +228,6 @@ async function getDashboard(req, res, next) {
         orderBy: { createdAt: "desc" },
       });
 
-      // Jika filter periode default UI tidak memiliki data pada bulan tersebut,
-      // fallback ke seluruh data agar dashboard tetap menampilkan metrik aktual DB
       if (skriningRecords.length === 0 && periode && !bulan && !tahun) {
         skriningRecords = await prisma.skriningStunting.findMany({
           where: baseWhere,
@@ -258,7 +256,6 @@ async function getDashboard(req, res, next) {
     const persenTinggi =
       totalKK > 0 ? Number(((tinggi / totalKK) * 100).toFixed(1)) : 0;
 
-    // Daftar prioritas: urutkan TINGGI -> SEDANG -> RENDAH, lalu terbaru
     const sortedForPrioritas = [...skriningRecords].sort((a, b) => {
       const rankDiff =
         (RISK_ORDER[a.statusRisiko] || 99) -

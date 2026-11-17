@@ -913,3 +913,4 @@ module.exports = {
   getPrediksiById,
   getRiwayat,
 };
+

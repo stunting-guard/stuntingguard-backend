@@ -7,3 +7,4 @@ const router = express.Router();
 router.get("/", verifyToken, authorizeRoles("KADER", "ADMIN"), getRiwayat);
 
 module.exports = router;
+
