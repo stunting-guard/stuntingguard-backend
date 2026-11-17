@@ -61,7 +61,9 @@ model Dusun {
 model SkriningStunting {
   id                Int          @id @default(autoincrement())
   kodeKeluarga      String?
+  noKk              String?
   kepalaKeluarga    String?
+  namaIbu           String?
   namaBalita        String?
   nikBalita         String?
   jenisKelamin      String?
@@ -74,10 +76,16 @@ model SkriningStunting {
   statusTb          String?
   statusBb          String?
   pendapatan        Int
+  statusSosialEkonomi String?
   pendidikanIbu     String
+  usiaIbu           Int?
   riwayatKehamilan  String
   sumberAir         String
   kondisiSanitasi   String
+  asiEksklusif      String?
+  praktikMpasi      String?
+  tinggiBadanIbu    Float?
+  beratLahirGram    Int?
   statusRisiko      StatusRisiko
   keyakinanModel    Float?
   ambangKritis      Float?

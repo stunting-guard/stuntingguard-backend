@@ -124,7 +124,9 @@ async function getDataKeluargaAparatur(req, res, next) {
           (k) =>
             (k.kepalaKeluarga && k.kepalaKeluarga.toLowerCase().includes(s)) ||
             (k.namaBalita && k.namaBalita.toLowerCase().includes(s)) ||
-            (k.kodeKeluarga && k.kodeKeluarga.toLowerCase().includes(s))
+            (k.kodeKeluarga && k.kodeKeluarga.toLowerCase().includes(s)) ||
+            (k.noKk && k.noKk.toLowerCase().includes(s)) ||
+            (k.namaIbu && k.namaIbu.toLowerCase().includes(s))
         );
       }
 

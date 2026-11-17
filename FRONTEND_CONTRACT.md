@@ -114,26 +114,48 @@ Response 200 (key & nilai harus sama persis dengan `OPTIONS` frontend):
   "success": true,
   "message": "Opsi formulir berhasil diambil",
   "data": {
-    "pendidikan": [
-      "Tidak Sekolah",
-      "SD (Sekolah Dasar / Sederajat)",
-      "SMP (Sekolah Menengah Pertama)",
-      "SMA (Sekolah Menengah Atas)",
-      "Perguruan Tinggi"
+    "statusSosialEkonomi": [
+      "Prasejahtera / Penerima Bantuan (PKH/BPNT)",
+      "Rentan Miskin / Bawah UMR",
+      "Menengah / Sejahtera"
     ],
-    "kek": ["Pernah KEK (Kurang Energi Kronis)", "Tidak Pernah KEK"],
-    "air": [
-      "PDAM / Perpipaan",
-      "Sumur Bor / Pompa",
-      "Sumur Gali Terlindung",
-      "Mata Air Tidak Terlindung",
-      "Sungai / Air Permukaan"
+    "pendidikan": [
+      "Tidak Tamat SD",
+      "SD / Sederajat",
+      "SMP / Sederajat",
+      "SMA / SMK / Sederajat",
+      "Diploma / Sarjana (D3/S1+)"
     ],
     "sanitasi": [
-      "Jamban Pribadi Layak",
-      "MCK Komunal",
-      "Jamban Tidak Layak",
-      "Tidak Ada Jamban"
+      "Jamban Sehat & Septictank Pribadi",
+      "Jamban Layak Tanpa Septictank",
+      "Sanitasi Komunal / MCK Bersama",
+      "Tidak Memiliki Jamban / BAB Sembarangan"
+    ],
+    "air": [
+      "PDAM / Air Kemasan / Isi Ulang",
+      "Sumur Pompa / Sumur Bor Terlindung",
+      "Sumur Timba / Mata Air Terlindung",
+      "Pamsimas / Penampungan Air Hujan",
+      "Air Sungai / Sumur Terbuka Tidak Terlindung"
+    ],
+    "asiEksklusif": [
+      "Ya (ASI Eksklusif 0–6 Bulan / Masih Berjalan)",
+      "Tidak (Diberi Susu Formula / Makanan Dini)"
+    ],
+    "praktikMpasi": [
+      "Belum Usia MPASI (< 6 Bulan)",
+      "Tepat Waktu & Gizi Seimbang (Protein Hewani)",
+      "Tepat Waktu Namun Kurang Beragam",
+      "Terlambat / Terlalu Dini (< 6 Bulan)"
+    ],
+    "kek": [
+      "Pernah KEK (Kurang Energi Kronis)",
+      "Tidak Pernah KEK"
+    ],
+    "jenisKelamin": [
+      "Laki-laki",
+      "Perempuan"
     ]
   }
 }
@@ -233,10 +255,13 @@ Request body — key form frontend dipertahankan, ditambah field wajib schema:
 
 ```json
 {
+  "noKk": "3204128492040001",
   "wilayah": "Desa Sukamaju, RW 03",
   "dusunId": 1,
+  "rt": "RT 02",
   "kodeKeluarga": "KK-SKM-0142",
   "kepalaKeluarga": "Bpk. Slamet Riyadi",
+  "namaIbu": "Ibu Siti Aminah",
   "namaBalita": "Ananda Yusuf",
   "nikBalita": "3204128492040002",
   "jenisKelamin": "Laki-laki",
@@ -244,14 +269,33 @@ Request body — key form frontend dipertahankan, ditambah field wajib schema:
   "tinggiBadan": 80.5,
   "beratBadan": 9.8,
   "pendapatan": 1500000,
-  "pendidikan": "SMA (Sekolah Menengah Atas)",
+  "statusSosialEkonomi": "Prasejahtera / Penerima Bantuan (PKH/BPNT)",
+  "pendidikan": "SMA / SMK / Sederajat",
+  "usiaIbu": 27,
+  "air": "Sumur Pompa / Sumur Bor Terlindung",
+  "sanitasi": "Jamban Sehat & Septictank Pribadi",
+  "asiEksklusif": "Ya (ASI Eksklusif 0–6 Bulan / Masih Berjalan)",
+  "praktikMpasi": "Tepat Waktu & Gizi Seimbang (Protein Hewani)",
   "kek": "Tidak Pernah KEK",
-  "air": "Sumur Bor / Pompa",
-  "sanitasi": "Jamban Pribadi Layak"
+  "tinggiBadanIbu": 152.0,
+  "beratLahirGram": 3100
 }
 ```
 
-Validasi frontend: `usia` 0–59, `pendapatan` digit saja, semua field wajib terisi.
+Fitur Model Prediksi ML (8 Fitur Tervalidasi Jurnal Atmadji & Nugraha, 2025; Ayue et al., 2025):
+1. `pendapatan`
+2. `statusSosialEkonomi`
+3. `pendidikan` / `pendidikanIbu`
+4. `sanitasi` / `kondisiSanitasi`
+5. `air` / `sumberAir`
+6. `usiaIbu`
+7. `asiEksklusif`
+8. `praktikMpasi`
+
+Data Identitas & Pendukung KIA:
+`noKk`, `kepalaKeluarga`, `namaIbu`, `namaBalita`, `nikBalita`, `jenisKelamin`, `usia` (usiaBulan), `rt`, `dusunId`, `tinggiBadan`, `beratBadan`, `tinggiBadanIbu`, `beratLahirGram`, `kek` (riwayatKehamilan).
+
+Validasi frontend: `usia` 0–59 bulan, `pendapatan` angka valid >= 0, field fitur utama wajib diisi. Backend menyediakan fallback cerdas jika opsi sosio-ekonomi atau KIA lama tidak dikirim.
 
 Pemetaan ke schema (lihat §7):
 `wilayah → Dusun`, `usia → usiaBulan`, `pendidikan → pendidikanIbu`, `kek → riwayatKehamilan`, `air → sumberAir`, `sanitasi → kondisiSanitasi`.

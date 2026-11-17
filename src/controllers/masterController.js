@@ -1,27 +1,42 @@
 const prisma = require("../config/prisma");
 
 const FORM_OPTIONS = {
-  pendidikan: [
-    "Tidak Sekolah",
-    "SD (Sekolah Dasar / Sederajat)",
-    "SMP (Sekolah Menengah Pertama)",
-    "SMA (Sekolah Menengah Atas)",
-    "Perguruan Tinggi",
+  statusSosialEkonomi: [
+    "Prasejahtera / Penerima Bantuan (PKH/BPNT)",
+    "Rentan Miskin / Bawah UMR",
+    "Menengah / Sejahtera",
   ],
-  kek: ["Pernah KEK (Kurang Energi Kronis)", "Tidak Pernah KEK"],
-  air: [
-    "PDAM / Perpipaan",
-    "Sumur Bor / Pompa",
-    "Sumur Gali Terlindung",
-    "Mata Air Tidak Terlindung",
-    "Sungai / Air Permukaan",
+  pendidikan: [
+    "Tidak Tamat SD",
+    "SD / Sederajat",
+    "SMP / Sederajat",
+    "SMA / SMK / Sederajat",
+    "Diploma / Sarjana (D3/S1+)",
   ],
   sanitasi: [
-    "Jamban Pribadi Layak",
-    "MCK Komunal",
-    "Jamban Tidak Layak",
-    "Tidak Ada Jamban",
+    "Jamban Sehat & Septictank Pribadi",
+    "Jamban Layak Tanpa Septictank",
+    "Sanitasi Komunal / MCK Bersama",
+    "Tidak Memiliki Jamban / BAB Sembarangan",
   ],
+  air: [
+    "PDAM / Air Kemasan / Isi Ulang",
+    "Sumur Pompa / Sumur Bor Terlindung",
+    "Sumur Timba / Mata Air Terlindung",
+    "Pamsimas / Penampungan Air Hujan",
+    "Air Sungai / Sumur Terbuka Tidak Terlindung",
+  ],
+  asiEksklusif: [
+    "Ya (ASI Eksklusif 0–6 Bulan / Masih Berjalan)",
+    "Tidak (Diberi Susu Formula / Makanan Dini)",
+  ],
+  praktikMpasi: [
+    "Belum Usia MPASI (< 6 Bulan)",
+    "Tepat Waktu & Gizi Seimbang (Protein Hewani)",
+    "Tepat Waktu Namun Kurang Beragam",
+    "Terlambat / Terlalu Dini (< 6 Bulan)",
+  ],
+  kek: ["Pernah KEK (Kurang Energi Kronis)", "Tidak Pernah KEK"],
   jenisKelamin: ["Laki-laki", "Perempuan"],
 };
 
