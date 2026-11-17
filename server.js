@@ -4,6 +4,10 @@ const express = require("express");
 const cors = require("cors");
 const prisma = require("./src/config/prisma");
 const authRoutes = require("./src/routes/authRoutes");
+const masterRoutes = require("./src/routes/masterRoutes");
+const kaderRoutes = require("./src/routes/kaderRoutes");
+const prediksiRoutes = require("./src/routes/prediksiRoutes");
+const riwayatRoutes = require("./src/routes/riwayatRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -40,10 +44,12 @@ app.get("/api/health", async (req, res) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/master", masterRoutes);
+app.use("/api/kader", kaderRoutes);
+app.use("/api/prediksi", prediksiRoutes);
+app.use("/api/riwayat", riwayatRoutes);
 
 // Placeholder route untuk task berikutnya:
-// app.use("/api/master", masterRoutes);
-// app.use("/api/kader", kaderRoutes);
 // app.use("/api/aparatur", aparaturRoutes);
 // app.use("/api/admin", adminRoutes);
 
