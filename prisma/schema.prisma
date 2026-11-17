@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum Role {
+  KADER
+  APARATUR
+  ADMIN
+}
+
+enum ZonaRisiko {
+  MERAH
+  KUNING
+  HIJAU
+}
+
+enum StatusRisiko {
+  TINGGI
+  SEDANG
+  RENDAH
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(KADER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dusunId  Int?
+  dusun    Dusun?             @relation(fields: [dusunId], references: [id])
+  skrining SkriningStunting[]
+}
+
+model Dusun {
+  id              Int        @id @default(autoincrement())
+  nama            String     @unique
+  namaSingkat     String?
+  rw              String
+  posyandu        String
+  kecamatan       String     @default("Cileunyi")
+  kapasitasBalita Int        @default(100)
+  zona            ZonaRisiko @default(HIJAU)
+  prioritas       String?
+  polygon         Json?
+  pusat           Json?
+  labelPos        Json?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  users    User[]
+  skrining SkriningStunting[]
+}
+
+model SkriningStunting {
+  id                Int          @id @default(autoincrement())
+  kodeKeluarga      String?
+  kepalaKeluarga    String?
+  namaBalita        String?
+  nikBalita         String?
+  jenisKelamin      String?
+  rt                String?
+  usiaBulan         Int
+  tinggiBadan       Float?
+  beratBadan        Float?
+  zScoreTb          Float?
+  zScoreBb          Float?
+  statusTb          String?
+  statusBb          String?
+  pendapatan        Int
+  pendidikanIbu     String
+  riwayatKehamilan  String
+  sumberAir         String
+  kondisiSanitasi   String
+  statusRisiko      StatusRisiko
+  keyakinanModel    Float?
+  ambangKritis      Float?
+  prioritas         String?
+  faktorDominan     String?
+  probabilitas      Json?
+  faktorDetail      Json?
+  rekomendasiDetail Json?
+  rencanaIntervensi String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  dusunId Int
+  dusun   Dusun @relation(fields: [dusunId], references: [id])
+  kaderId Int?
+  kader   User? @relation(fields: [kaderId], references: [id])
+}
