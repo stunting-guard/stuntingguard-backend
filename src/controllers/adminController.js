@@ -580,7 +580,9 @@ async function getDataset(req, res, next) {
     if (searchQuery) {
       where.OR = [
         { kodeKeluarga: { contains: searchQuery } },
+        { noKk: { contains: searchQuery } },
         { kepalaKeluarga: { contains: searchQuery } },
+        { namaIbu: { contains: searchQuery } },
         { namaBalita: { contains: searchQuery } },
       ];
 
@@ -636,7 +638,9 @@ async function getDataset(req, res, next) {
         id: `BLT-${String(s.id).padStart(3, "0")}`,
         skriningId: s.id,
         kodeKeluarga: s.kodeKeluarga || `KK-SKM-${String(s.id).padStart(4, "0")}`,
+        noKk: s.noKk || "-",
         kepalaKeluarga: s.kepalaKeluarga || "-",
+        namaIbu: s.namaIbu || "-",
         namaBalita: s.namaBalita || "-",
         usia: s.usiaBulan,
         usiaBulan: s.usiaBulan,
@@ -647,6 +651,14 @@ async function getDataset(req, res, next) {
         sanitasi: s.kondisiSanitasi || "-",
         sanitasiLayak,
         air: s.sumberAir || "-",
+        pendapatan: s.pendapatan || 0,
+        statusSosialEkonomi: s.statusSosialEkonomi || "-",
+        pendidikanIbu: s.pendidikanIbu || "-",
+        usiaIbu: s.usiaIbu || null,
+        asiEksklusif: s.asiEksklusif || "-",
+        praktikMpasi: s.praktikMpasi || "-",
+        tinggiBadanIbu: s.tinggiBadanIbu || null,
+        beratLahirGram: s.beratLahirGram || null,
         risiko: toTitleCaseRisk(s.statusRisiko),
         statusRisiko: s.statusRisiko,
         dusun: s.dusun ? s.dusun.nama : "-",
@@ -662,7 +674,7 @@ async function getDataset(req, res, next) {
       data: {
         summary: {
           totalData: total,
-          jumlahFitur: 6,
+          jumlahFitur: 8,
           statusDataset: "Siap Latih",
           pageSize,
         },
@@ -799,11 +811,19 @@ async function importDataset(req, res, next) {
             zScoreBb: statusRisiko === "TINGGI" ? -1.8 : statusRisiko === "SEDANG" ? -1.0 : 0.2,
             statusTb: statusRisiko === "TINGGI" ? "Di Bawah Standar (Pendek)" : "Normal",
             statusBb: statusRisiko === "TINGGI" ? "Kurang" : "Normal",
-            pendapatan: 1800000,
-            pendidikanIbu: "SMA (Sekolah Menengah Atas)",
-            riwayatKehamilan: "Tidak Pernah KEK",
+            pendapatan: row.pendapatan ? parseInt(row.pendapatan, 10) : 1800000,
+            statusSosialEkonomi: row.statusSosialEkonomi || "Rentan Miskin / Bawah UMR",
+            pendidikanIbu: row.pendidikanIbu || row.pendidikan || "SMA (Sekolah Menengah Atas)",
+            usiaIbu: row.usiaIbu ? parseInt(row.usiaIbu, 10) : null,
+            riwayatKehamilan: row.riwayatKehamilan || row.kek || "Tidak Pernah KEK",
             sumberAir,
             kondisiSanitasi,
+            asiEksklusif: row.asiEksklusif || "Ya (ASI Eksklusif 0–6 Bulan / Masih Berjalan)",
+            praktikMpasi: row.praktikMpasi || "Tepat Waktu & Gizi Seimbang (Protein Hewani)",
+            noKk: row.noKk || null,
+            namaIbu: row.namaIbu || null,
+            tinggiBadanIbu: row.tinggiBadanIbu ? parseFloat(row.tinggiBadanIbu) : null,
+            beratLahirGram: row.beratLahirGram ? parseInt(row.beratLahirGram, 10) : null,
             statusRisiko,
             keyakinanModel: 91.5,
             ambangKritis: 70,
@@ -981,12 +1001,14 @@ async function getEvaluasiModel(req, res, next) {
     ];
 
     const featureImportance = [
-      { fitur: "Kondisi Sanitasi & Jamban", bobot: 32.5 },
-      { fitur: "Akses Sumber Air Bersih", bobot: 24.8 },
-      { fitur: "Pendapatan Keluarga", bobot: 18.2 },
-      { fitur: "Tingkat Pendidikan Ibu", bobot: 12.4 },
-      { fitur: "Riwayat KEK Masa Kehamilan", bobot: 8.6 },
-      { fitur: "Usia Balita (Bulan)", bobot: 3.5 },
+      { fitur: "Kondisi Sanitasi & Jamban", bobot: 28.5 },
+      { fitur: "Akses Sumber Air Bersih", bobot: 22.4 },
+      { fitur: "Pendapatan Keluarga", bobot: 16.2 },
+      { fitur: "Status Sosial Ekonomi (PKH/BPNT)", bobot: 11.5 },
+      { fitur: "Praktik Pemberian MPASI", bobot: 8.4 },
+      { fitur: "Pemberian ASI Eksklusif", bobot: 6.2 },
+      { fitur: "Usia Reproduksi Ibu", bobot: 4.1 },
+      { fitur: "Tingkat Pendidikan Ibu", bobot: 2.7 },
     ];
 
     return res.status(200).json({

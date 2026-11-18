@@ -141,139 +141,391 @@ function estimateAnthropometry({ usiaBulan, tinggiBadan, beratBadan, statusRisik
   };
 }
 
-function calculateDeterministicPrediction(input, dusun) {
+/**
+ * Logika klasifikasi deterministik berbasis 8 fitur tervalidasi jurnal acuan:
+ * (Atmadji & Nugraha, 2025; Ayue et al., 2025)
+ *
+ * 1. pendapatan
+ * 2. statusSosialEkonomi
+ * 3. pendidikan / pendidikanIbu
+ * 4. sanitasi / kondisiSanitasi
+ * 5. air / sumberAir
+ * 6. usiaIbu
+ * 7. asiEksklusif
+ * 8. praktikMpasi
+ */
+function calculateDeterministicPrediction(fiturModel, antropometri = {}, dusun = {}) {
   const {
-    usiaBulan,
-    tinggiBadan,
-    beratBadan,
-    pendapatan,
-    pendidikanIbu,
-    riwayatKehamilan,
-    sumberAir,
-    kondisiSanitasi,
-  } = input;
+    pendapatan = 0,
+    statusSosialEkonomi = "",
+    pendidikan = "",
+    pendidikanIbu = pendidikan,
+    sanitasi = "",
+    kondisiSanitasi = sanitasi,
+    air = "",
+    sumberAir = air,
+    usiaIbu = null,
+    asiEksklusif = "",
+    praktikMpasi = "",
+  } = fiturModel;
+
+  const {
+    usiaBulan = 12,
+    tinggiBadan = null,
+    beratBadan = null,
+    tinggiBadanIbu = null,
+    beratLahirGram = null,
+  } = antropometri;
 
   const rawFactors = [];
   let riskScore = 0;
 
-  // 1. Sanitasi (0 - 30 poin)
-  const sanitasiLower = String(kondisiSanitasi).toLowerCase();
-  if (sanitasiLower.includes("tidak ada")) {
+  // 1. Kondisi Sanitasi (0 - 30 poin)
+  const sanitasiLower = String(kondisiSanitasi || "").toLowerCase();
+  if (
+    sanitasiLower.includes("tidak memiliki") ||
+    sanitasiLower.includes("tidak ada") ||
+    sanitasiLower.includes("sembarangan")
+  ) {
     riskScore += 30;
-    rawFactors.push({ label: "Tidak Ada Jamban Keluarga", weight: 30, short: "Sanitasi Buruk" });
-  } else if (sanitasiLower.includes("tidak layak")) {
-    riskScore += 26;
-    rawFactors.push({ label: "Sanitasi Tidak Layak", weight: 26, short: "Sanitasi Tidak Layak" });
-  } else if (sanitasiLower.includes("komunal") || sanitasiLower.includes("mck")) {
-    riskScore += 15;
-    rawFactors.push({ label: "Sanitasi Komunal (MCK Bersama)", weight: 15, short: "Sanitasi Komunal" });
-  } else {
-    rawFactors.push({ label: "Kondisi Sanitasi", weight: 6, short: "Sanitasi Layak" });
-  }
-
-  // 2. Sumber Air (0 - 25 poin)
-  const airLower = String(sumberAir).toLowerCase();
-  if (airLower.includes("sungai") || airLower.includes("permukaan")) {
-    riskScore += 25;
     rawFactors.push({
-      label: "Sumber Air Permukaan / Sungai",
-      weight: 25,
-      short: "Sumber Air Minum",
+      label: "Tidak Memiliki Jamban / BAB Sembarangan",
+      weight: 30,
+      short: "Sanitasi Buruk",
     });
-  } else if (airLower.includes("tidak terlindung")) {
-    riskScore += 22;
+  } else if (
+    sanitasiLower.includes("komunal") ||
+    sanitasiLower.includes("mck")
+  ) {
+    riskScore += 16;
     rawFactors.push({
-      label: "Sumber Air Tak Terlindungi (Sumur Terbuka)",
-      weight: 22,
-      short: "Sumber Air Minum",
+      label: "Sanitasi Komunal (MCK Bersama)",
+      weight: 16,
+      short: "Sanitasi Komunal",
     });
-  } else if (airLower.includes("sumur gali")) {
+  } else if (
+    sanitasiLower.includes("tanpa septictank") ||
+    sanitasiLower.includes("tidak layak")
+  ) {
     riskScore += 10;
     rawFactors.push({
-      label: "Akses Air Sumur Gali",
+      label: "Jamban Layak Tanpa Septictank",
       weight: 10,
-      short: "Akses Air Bersih",
+      short: "Jamban Tanpa Septictank",
     });
   } else {
     rawFactors.push({
-      label: "Akses Air Bersih",
-      weight: 5,
-      short: "Akses Air Bersih",
+      label: "Jamban Sehat & Septictank Pribadi",
+      weight: 2,
+      short: "Sanitasi Layak",
     });
   }
 
-  // 3. Riwayat KEK Ibu (0 - 20 poin)
-  const kekLower = String(riwayatKehamilan).toLowerCase();
-  if (kekLower.includes("pernah kek") && !kekLower.includes("tidak pernah")) {
-    riskScore += 20;
+  // 2. Akses Air Bersih (0 - 25 poin)
+  const airLower = String(sumberAir || "").toLowerCase();
+  if (
+    airLower.includes("sungai") ||
+    airLower.includes("permukaan") ||
+    (airLower.includes("terbuka") && airLower.includes("tidak terlindung"))
+  ) {
+    riskScore += 25;
     rawFactors.push({
-      label: "Riwayat KEK Ibu (Kurang Energi Kronis)",
-      weight: 20,
-      short: "Riwayat KEK Ibu",
+      label: "Air Permukaan / Sungai Tak Terlindung",
+      weight: 25,
+      short: "Air Tak Terlindung",
+    });
+  } else if (
+    airLower.includes("pamsimas") ||
+    airLower.includes("hujan")
+  ) {
+    riskScore += 15;
+    rawFactors.push({
+      label: "Pamsimas / Penampungan Air Hujan",
+      weight: 15,
+      short: "Air Hujan / Pamsimas",
+    });
+  } else if (
+    airLower.includes("sumur timba") ||
+    airLower.includes("mata air")
+  ) {
+    riskScore += 10;
+    rawFactors.push({
+      label: "Sumur Timba / Mata Air Terlindung",
+      weight: 10,
+      short: "Sumur Timba",
+    });
+  } else if (
+    airLower.includes("sumur bor") ||
+    airLower.includes("sumur pompa")
+  ) {
+    riskScore += 5;
+    rawFactors.push({
+      label: "Sumur Pompa / Bor Terlindung",
+      weight: 5,
+      short: "Sumur Bor",
     });
   } else {
     rawFactors.push({
-      label: "Riwayat Kesehatan Kehamilan Ibu",
-      weight: 5,
-      short: "Gizi Ibu",
+      label: "PDAM / Air Minum Kemasan Terlindungi",
+      weight: 2,
+      short: "Air Bersih Layak",
+    });
+  }
+
+  // 3. Status Sosial Ekonomi Keluarga (0 - 20 poin)
+  const sosEkLower = String(statusSosialEkonomi || "").toLowerCase();
+  if (
+    sosEkLower.includes("prasejahtera") ||
+    sosEkLower.includes("pkh") ||
+    sosEkLower.includes("bpnt")
+  ) {
+    riskScore += 20;
+    rawFactors.push({
+      label: "Status Sosial Ekonomi Prasejahtera (Penerima PKH/BPNT)",
+      weight: 20,
+      short: "Keluarga Prasejahtera",
+    });
+  } else if (
+    sosEkLower.includes("rentan") ||
+    sosEkLower.includes("bawah umr")
+  ) {
+    riskScore += 12;
+    rawFactors.push({
+      label: "Status Sosial Ekonomi Rentan Miskin / Bawah UMR",
+      weight: 12,
+      short: "Rentan Miskin",
+    });
+  } else if (
+    sosEkLower.includes("menengah") ||
+    sosEkLower.includes("sejahtera")
+  ) {
+    riskScore += 3;
+    rawFactors.push({
+      label: "Ketahanan Sosial Ekonomi Keluarga Mampu",
+      weight: 3,
+      short: "Sosial Ekonomi Mampu",
+    });
+  } else {
+    riskScore += 8;
+    rawFactors.push({
+      label: "Kondisi Ketahanan Ekonomi Keluarga",
+      weight: 8,
+      short: "Ketahanan Ekonomi",
     });
   }
 
   // 4. Pendapatan Keluarga (0 - 15 poin)
-  if (pendapatan < 1500000) {
+  const pendNum = Number(pendapatan) || 0;
+  if (pendNum < 1500000) {
     riskScore += 15;
     rawFactors.push({
-      label: "Pendapatan Rendah (Di Bawah UMR Daerah)",
-      weight: 18,
-      short: "Pendapatan Keluarga",
+      label: "Pendapatan Rendah (< Rp 1.500.000)",
+      weight: 15,
+      short: "Pendapatan Rendah",
     });
-  } else if (pendapatan < 2500000) {
-    riskScore += 9;
+  } else if (pendNum < 2500000) {
+    riskScore += 8;
     rawFactors.push({
-      label: "Pendapatan Keluarga Terbatas",
-      weight: 12,
-      short: "Pendapatan Keluarga",
+      label: "Pendapatan Terbatas (< Rp 2.500.000)",
+      weight: 8,
+      short: "Pendapatan Terbatas",
     });
   } else {
     rawFactors.push({
-      label: "Ketahanan Ekonomi Keluarga",
-      weight: 5,
-      short: "Ekonomi Stabil",
+      label: "Ketahanan Pendapatan Keluarga Memadai",
+      weight: 3,
+      short: "Ekonomi Memadai",
     });
   }
 
-  // 5. Pendidikan Ibu (0 - 12 poin)
-  const eduLower = String(pendidikanIbu).toLowerCase();
-  if (eduLower.includes("tidak sekolah") || eduLower.includes("sd")) {
-    riskScore += 12;
+  // 5. Pendidikan Ibu (0 - 15 poin)
+  const eduLower = String(pendidikanIbu || "").toLowerCase();
+  if (
+    eduLower.includes("tidak tamat") ||
+    eduLower.includes("tidak sekolah")
+  ) {
+    riskScore += 15;
     rawFactors.push({
-      label: "Pendidikan Ibu (Tamat SD / Tidak Selesai)",
-      weight: 14,
+      label: "Pendidikan Ibu Tidak Tamat SD",
+      weight: 15,
       short: "Pendidikan Ibu Rendah",
     });
-  } else if (eduLower.includes("smp")) {
-    riskScore += 7;
+  } else if (eduLower.includes("sd")) {
+    riskScore += 12;
     rawFactors.push({
-      label: "Pendidikan Pengasuh (SMP)",
-      weight: 10,
-      short: "Pendidikan Ibu",
+      label: "Pendidikan Terakhir Ibu Tamat SD",
+      weight: 12,
+      short: "Pendidikan Ibu SD",
+    });
+  } else if (eduLower.includes("smp")) {
+    riskScore += 8;
+    rawFactors.push({
+      label: "Pendidikan Terakhir Ibu Tamat SMP",
+      weight: 8,
+      short: "Pendidikan Ibu SMP",
+    });
+  } else if (eduLower.includes("sma") || eduLower.includes("smk")) {
+    riskScore += 4;
+    rawFactors.push({
+      label: "Pendidikan Terakhir Ibu SMA/SMK",
+      weight: 4,
+      short: "Pendidikan Ibu Menengah",
+    });
+  } else if (
+    eduLower.includes("diploma") ||
+    eduLower.includes("sarjana") ||
+    eduLower.includes("d3") ||
+    eduLower.includes("s1")
+  ) {
+    riskScore += 1;
+    rawFactors.push({
+      label: "Pendidikan Terakhir Ibu Diploma/Sarjana",
+      weight: 1,
+      short: "Pendidikan Ibu Tinggi",
     });
   } else {
+    riskScore += 5;
     rawFactors.push({
-      label: "Pola Asuh & Literasi Gizi Ibu",
+      label: "Literasi Gizi & Pendidikan Ibu",
       weight: 5,
-      short: "Pola Asuh & Gizi Seimbang",
+      short: "Pendidikan Ibu",
     });
   }
 
-  // Penyesuaian antropometri jika diisi
-  if (tinggiBadan !== null && tinggiBadan !== undefined && !Number.isNaN(Number(tinggiBadan))) {
-    const expectedTb = 50 + usiaBulan * 1.1;
-    if (Number(tinggiBadan) < expectedTb - 6) {
-      riskScore += 15;
+  // 6. Usia Ibu Saat Mengasuh / Hamil (0 - 16 poin)
+  const numUsiaIbu = Number(usiaIbu);
+  if (numUsiaIbu > 0 && numUsiaIbu < 20) {
+    riskScore += 16;
+    rawFactors.push({
+      label: "Usia Ibu Berisiko Tinggi (< 20 Tahun)",
+      weight: 16,
+      short: "Usia Ibu < 20 Thn",
+    });
+  } else if (numUsiaIbu > 35) {
+    riskScore += 12;
+    rawFactors.push({
+      label: "Usia Ibu Berisiko (> 35 Tahun)",
+      weight: 12,
+      short: "Usia Ibu > 35 Thn",
+    });
+  } else if (numUsiaIbu >= 20 && numUsiaIbu <= 35) {
+    rawFactors.push({
+      label: "Usia Ibu Reproduksi Sehat (20–35 Tahun)",
+      weight: 3,
+      short: "Usia Reproduksi Sehat",
+    });
+  } else {
+    rawFactors.push({
+      label: "Rentang Usia Reproduksi Ibu",
+      weight: 4,
+      short: "Usia Ibu",
+    });
+  }
+
+  // 7. Riwayat ASI Eksklusif (0 - 16 poin)
+  const asiLower = String(asiEksklusif || "").toLowerCase();
+  if (
+    asiLower.includes("tidak") ||
+    asiLower.includes("formula") ||
+    asiLower.includes("makanan dini")
+  ) {
+    riskScore += 16;
+    rawFactors.push({
+      label: "Tidak Mendapatkan ASI Eksklusif (Formula/Dini)",
+      weight: 16,
+      short: "Bukan ASI Eksklusif",
+    });
+  } else if (
+    asiLower.includes("ya") ||
+    asiLower.includes("eksklusif")
+  ) {
+    rawFactors.push({
+      label: "Pemberian ASI Eksklusif 0–6 Bulan Optimal",
+      weight: 2,
+      short: "ASI Eksklusif",
+    });
+  } else {
+    rawFactors.push({
+      label: "Praktik Pemberian ASI Balita",
+      weight: 5,
+      short: "Pemberian ASI",
+    });
+  }
+
+  // 8. Praktik Pemberian MPASI (0 - 15 poin)
+  const mpasiLower = String(praktikMpasi || "").toLowerCase();
+  if (
+    mpasiLower.includes("terlambat") ||
+    mpasiLower.includes("terlalu dini")
+  ) {
+    riskScore += 15;
+    rawFactors.push({
+      label: "Praktik MPASI Terlambat atau Terlalu Dini",
+      weight: 15,
+      short: "MPASI Kurang Tepat",
+    });
+  } else if (mpasiLower.includes("kurang beragam")) {
+    riskScore += 10;
+    rawFactors.push({
+      label: "Praktik MPASI Kurang Beragam (Minim Protein Hewani)",
+      weight: 10,
+      short: "MPASI Kurang Beragam",
+    });
+  } else if (
+    mpasiLower.includes("seimbang") ||
+    mpasiLower.includes("tepat waktu")
+  ) {
+    rawFactors.push({
+      label: "Praktik MPASI Tepat Waktu & Gizi Seimbang",
+      weight: 2,
+      short: "MPASI Gizi Seimbang",
+    });
+  } else if (mpasiLower.includes("belum")) {
+    rawFactors.push({
+      label: "Belum Memasuki Usia MPASI (< 6 Bulan)",
+      weight: 2,
+      short: "Belum Usia MPASI",
+    });
+  } else {
+    rawFactors.push({
+      label: "Pola Asuh Praktik Pemberian MPASI",
+      weight: 4,
+      short: "Praktik MPASI",
+    });
+  }
+
+  // Data Pendukung KIA Tambahan (Opsional)
+  if (beratLahirGram !== null && beratLahirGram !== undefined && !Number.isNaN(Number(beratLahirGram))) {
+    if (Number(beratLahirGram) < 2500) {
+      riskScore += 10;
+      rawFactors.push({
+        label: "Riwayat Berat Badan Lahir Rendah (BBLR < 2500g)",
+        weight: 12,
+        short: "Riwayat BBLR",
+      });
     }
   }
 
+  if (tinggiBadanIbu !== null && tinggiBadanIbu !== undefined && !Number.isNaN(Number(tinggiBadanIbu))) {
+    if (Number(tinggiBadanIbu) < 145) {
+      riskScore += 8;
+      rawFactors.push({
+        label: "Tinggi Badan Ibu Pendek (< 145 cm)",
+        weight: 8,
+        short: "TB Ibu Pendek",
+      });
+    }
+  }
+
+  // Penyesuaian antropometri balita jika diisi
+  if (tinggiBadan !== null && tinggiBadan !== undefined && !Number.isNaN(Number(tinggiBadan))) {
+    const expectedTb = 50 + usiaBulan * 1.1;
+    if (Number(tinggiBadan) < expectedTb - 6) {
+      riskScore += 12;
+    }
+  }
+
+  // Menentukan Kategori Risiko Berdasarkan Akumulasi Skor
   let statusRisiko = "RENDAH";
   let pTinggi = 8;
   let pSedang = 17;
@@ -283,21 +535,21 @@ function calculateDeterministicPrediction(input, dusun) {
 
   if (riskScore >= 48) {
     statusRisiko = "TINGGI";
-    pTinggi = Math.min(82, Math.max(60, Math.round(riskScore)));
-    pSedang = Math.min(30, Math.max(12, Math.round((100 - pTinggi) * 0.72)));
-    pRendah = Math.max(3, 100 - pTinggi - pSedang);
-    keyakinanModel = Math.min(96, 82 + Math.round((riskScore - 48) / 3));
+    pTinggi = Math.min(84, Math.max(62, Math.round(riskScore)));
+    pSedang = Math.min(28, Math.max(12, Math.round((100 - pTinggi) * 0.72)));
+    pRendah = Math.max(4, 100 - pTinggi - pSedang);
+    keyakinanModel = Math.min(96, 84 + Math.round((riskScore - 48) / 3));
     prioritas = "Prioritas 1";
   } else if (riskScore >= 24) {
     statusRisiko = "SEDANG";
-    pSedang = Math.min(68, Math.max(50, 45 + Math.round(riskScore / 2)));
-    pTinggi = Math.min(30, Math.max(14, Math.round(riskScore * 0.55)));
+    pSedang = Math.min(68, Math.max(50, 46 + Math.round(riskScore / 2)));
+    pTinggi = Math.min(30, Math.max(14, Math.round(riskScore * 0.52)));
     pRendah = Math.max(8, 100 - pTinggi - pSedang);
-    keyakinanModel = Math.min(86, 72 + Math.round((riskScore - 24) / 2));
+    keyakinanModel = Math.min(86, 74 + Math.round((riskScore - 24) / 2));
     prioritas = "Prioritas 2";
   } else {
     statusRisiko = "RENDAH";
-    pRendah = Math.min(88, Math.max(70, 86 - riskScore));
+    pRendah = Math.min(88, Math.max(70, 88 - riskScore));
     pSedang = Math.max(8, Math.round((100 - pRendah) * 0.7));
     pTinggi = Math.max(4, 100 - pRendah - pSedang);
     keyakinanModel = 90;
@@ -319,8 +571,8 @@ function calculateDeterministicPrediction(input, dusun) {
 
   const faktorDominan =
     statusRisiko === "RENDAH"
-      ? "Pola Asuh & Gizi Seimbang"
-      : `${sortedFactors[0].short} & ${sortedFactors[1].short}`;
+      ? "Pola Asuh & Ketahanan Keluarga"
+      : `${sortedFactors[0].short} & ${sortedFactors[1]?.short || "Sanitasi"}`;
 
   const namaPosyandu = dusun?.posyandu || "Posyandu Desa Sukamaju";
   const namaDusunSingkat = dusun?.namaSingkat || "Melati";
@@ -333,16 +585,16 @@ function calculateDeterministicPrediction(input, dusun) {
 
   if (statusRisiko === "TINGGI") {
     teksRekomendasi =
-      "Segera jadwalkan rujukan perbaikan sanitasi/lingkungan ke Sanitarian Puskesmas dan fasilitasi bantuan PMT pemulihan berbahan pangan hewani serta pemantauan intensif oleh Bidan Desa.";
+      "Segera koordinasikan rujukan perbaikan sanitasi/lingkungan ke Sanitarian Puskesmas dan fasilitasi bantuan PMT pemulihan berbasis pangan hewani serta pemantauan intensif oleh Bidan Desa.";
     batasRekomendasi = "3 Hari Kerja";
     penerimaRekomendasi = `Puskesmas ${namaDusunSingkat}`;
-    rencanaIntervensi = "Rujukan Puskesmas + PMT pemulihan 90 hari";
+    rencanaIntervensi = "Rujukan Puskesmas + PMT Pemulihan Hewani (90 Hari) + Intervensi Sanitasi";
   } else if (statusRisiko === "SEDANG") {
     teksRekomendasi =
-      "Lanjutkan konseling gizi terarah, pemantauan tinggi dan berat badan berkala, serta edukasi sanitasi dan air bersih bersama kader Posyandu.";
+      "Tingkatkan edukasi praktik MPASI kaya protein hewani, konseling gizi pengasuhan balita, dan pemantauan penimbangan berkala di Posyandu setiap bulan.";
     batasRekomendasi = "7 Hari Kerja";
     penerimaRekomendasi = namaPosyandu;
-    rencanaIntervensi = "Konseling gizi & pantau Posyandu";
+    rencanaIntervensi = "Konseling gizi seimbang, edukasi MPASI & pemantauan rutin Posyandu";
   }
 
   const probabilitas = [
@@ -394,22 +646,26 @@ function calculateDeterministicPrediction(input, dusun) {
   };
 }
 
-async function callMlOrFallback(input, dusun) {
+/**
+ * Memanggil API machine learning eksternal (Python Random Forest)
+ * hanya dengan 8 fitur model tervalidasi, atau fallback deterministik jika offline.
+ */
+async function callMlOrFallback(fiturModel, antropometri = {}, dusun = {}) {
   const mlUrl = process.env.ML_API_URL || "http://localhost:8000/predict";
-  const fallback = calculateDeterministicPrediction(input, dusun);
+  const fallback = calculateDeterministicPrediction(fiturModel, antropometri, dusun);
 
   try {
     const response = await axios.post(
       mlUrl,
       {
-        usiaBulan: input.usiaBulan,
-        tinggiBadan: input.tinggiBadan,
-        beratBadan: input.beratBadan,
-        pendapatan: input.pendapatan,
-        pendidikanIbu: input.pendidikanIbu,
-        riwayatKehamilan: input.riwayatKehamilan,
-        sumberAir: input.sumberAir,
-        kondisiSanitasi: input.kondisiSanitasi,
+        pendapatan: fiturModel.pendapatan,
+        statusSosialEkonomi: fiturModel.statusSosialEkonomi,
+        pendidikan: fiturModel.pendidikan || fiturModel.pendidikanIbu,
+        sanitasi: fiturModel.sanitasi || fiturModel.kondisiSanitasi,
+        air: fiturModel.air || fiturModel.sumberAir,
+        usiaIbu: fiturModel.usiaIbu,
+        asiEksklusif: fiturModel.asiEksklusif,
+        praktikMpasi: fiturModel.praktikMpasi,
       },
       { timeout: 2500 }
     );
@@ -533,6 +789,31 @@ function formatHasilKlasifikasiResponse(record) {
   return {
     id: record.id,
     kodeKeluarga,
+    noKk: record.noKk || null,
+    kepalaKeluarga: record.kepalaKeluarga || null,
+    namaIbu: record.namaIbu || null,
+    namaBalita: record.namaBalita || null,
+    nikBalita: record.nikBalita || null,
+    jenisKelamin: record.jenisKelamin || null,
+    rt: record.rt || null,
+    usiaBulan: record.usiaBulan,
+    tinggiBadan: record.tinggiBadan,
+    beratBadan: record.beratBadan,
+    zScoreTb: record.zScoreTb,
+    zScoreBb: record.zScoreBb,
+    statusTb: record.statusTb,
+    statusBb: record.statusBb,
+    pendapatan: record.pendapatan,
+    statusSosialEkonomi: record.statusSosialEkonomi || null,
+    pendidikanIbu: record.pendidikanIbu,
+    usiaIbu: record.usiaIbu || null,
+    riwayatKehamilan: record.riwayatKehamilan,
+    sumberAir: record.sumberAir,
+    kondisiSanitasi: record.kondisiSanitasi,
+    asiEksklusif: record.asiEksklusif || null,
+    praktikMpasi: record.praktikMpasi || null,
+    tinggiBadanIbu: record.tinggiBadanIbu || null,
+    beratLahirGram: record.beratLahirGram || null,
     keluarga: `${kepala} & Balita: ${balita} (${record.usiaBulan} bln) • ${rw}`,
     tanggal,
     jam,
@@ -540,7 +821,14 @@ function formatHasilKlasifikasiResponse(record) {
     statusRisiko: record.statusRisiko,
     keyakinan: record.keyakinanModel ?? 85,
     ambangKritis: record.ambangKritis ?? AMBANG_KRITIS,
-    prioritas: record.prioritas || "Prioritas 1",
+    prioritas:
+      record.prioritas ||
+      (record.statusRisiko === "TINGGI"
+        ? "Prioritas 1"
+        : record.statusRisiko === "SEDANG"
+        ? "Prioritas 2"
+        : "Aman"),
+    faktorDominan: record.faktorDominan || "Sanitasi & Air Bersih",
     probabilitas: Array.isArray(record.probabilitas)
       ? record.probabilitas
       : defaultProbabilitas,
@@ -567,6 +855,7 @@ function formatHasilKlasifikasiResponse(record) {
         ? rekDetail.intervensi
         : buildIntervensiList(record.statusRisiko),
     },
+    dusun: record.dusun || null,
   };
 }
 
@@ -625,19 +914,103 @@ async function createPrediksi(req, res, next) {
   try {
     const body = req.body || {};
 
+    // 1. Identitas Keluarga & Balita
+    const noKk = body.noKk ? String(body.noKk).trim() : null;
+    const kepalaKeluarga =
+      body.kepalaKeluarga && String(body.kepalaKeluarga).trim()
+        ? String(body.kepalaKeluarga).trim()
+        : null;
+    const namaIbu =
+      body.namaIbu && String(body.namaIbu).trim()
+        ? String(body.namaIbu).trim()
+        : null;
+    const namaBalita =
+      body.namaBalita && String(body.namaBalita).trim()
+        ? String(body.namaBalita).trim()
+        : null;
+    const nikBalita =
+      body.nikBalita && String(body.nikBalita).trim()
+        ? String(body.nikBalita).trim()
+        : null;
+    const jenisKelamin =
+      body.jenisKelamin && String(body.jenisKelamin).trim()
+        ? String(body.jenisKelamin).trim()
+        : "Laki-laki";
+    const rt =
+      body.rt && String(body.rt).trim() ? String(body.rt).trim() : "RT 01";
     const rawUsia = body.usia !== undefined ? body.usia : body.usiaBulan;
+
+    // 2. Fitur Model Prediksi (8 Fitur Jurnal Acuan)
     const rawPendapatan = body.pendapatan;
     const pendidikanIbu = String(
       body.pendidikan || body.pendidikanIbu || ""
-    ).trim();
-    const riwayatKehamilan = String(
-      body.kek || body.riwayatKehamilan || ""
     ).trim();
     const sumberAir = String(body.air || body.sumberAir || "").trim();
     const kondisiSanitasi = String(
       body.sanitasi || body.kondisiSanitasi || ""
     ).trim();
 
+    // Nilai default cerdas untuk fitur sosio-ekonomi & pengasuhan baru agar backward-compatible
+    const statusSosialEkonomi = String(
+      body.statusSosialEkonomi ||
+        body.statusEkonomi ||
+        (Number(rawPendapatan) < 1500000
+          ? "Prasejahtera / Penerima Bantuan (PKH/BPNT)"
+          : Number(rawPendapatan) < 3000000
+          ? "Rentan Miskin / Bawah UMR"
+          : "Menengah / Sejahtera")
+    ).trim();
+
+    const usiaIbu =
+      body.usiaIbu !== undefined && body.usiaIbu !== "" && !Number.isNaN(Number(body.usiaIbu))
+        ? parseInt(body.usiaIbu, 10)
+        : null;
+
+    const asiEksklusif = String(
+      body.asiEksklusif || "Ya (ASI Eksklusif 0–6 Bulan / Masih Berjalan)"
+    ).trim();
+
+    const praktikMpasi = String(
+      body.praktikMpasi ||
+        (Number(rawUsia) < 6
+          ? "Belum Usia MPASI (< 6 Bulan)"
+          : "Tepat Waktu & Gizi Seimbang (Protein Hewani)")
+    ).trim();
+
+    // 3. Data Pendukung KIA (Opsional / Non-Fitur Utama)
+    const riwayatKehamilan = String(
+      body.kek || body.riwayatKehamilan || "Tidak Pernah KEK"
+    ).trim();
+
+    const tinggiBadanIbu =
+      body.tinggiBadanIbu !== undefined &&
+      body.tinggiBadanIbu !== "" &&
+      !Number.isNaN(Number(body.tinggiBadanIbu))
+        ? parseFloat(body.tinggiBadanIbu)
+        : null;
+
+    const beratLahirGram =
+      body.beratLahirGram !== undefined &&
+      body.beratLahirGram !== "" &&
+      !Number.isNaN(Number(body.beratLahirGram))
+        ? parseInt(body.beratLahirGram, 10)
+        : null;
+
+    const tinggiBadan =
+      body.tinggiBadan !== undefined &&
+      body.tinggiBadan !== "" &&
+      !Number.isNaN(Number(body.tinggiBadan))
+        ? parseFloat(body.tinggiBadan)
+        : null;
+
+    const beratBadan =
+      body.beratBadan !== undefined &&
+      body.beratBadan !== "" &&
+      !Number.isNaN(Number(body.beratBadan))
+        ? parseFloat(body.beratBadan)
+        : null;
+
+    // Validasi Field Utama
     const errors = {};
     const usiaBulan = Number(rawUsia);
     if (
@@ -663,9 +1036,6 @@ async function createPrediksi(req, res, next) {
 
     if (!pendidikanIbu) {
       errors.pendidikan = "Pendidikan terakhir ibu wajib dipilih.";
-    }
-    if (!riwayatKehamilan) {
-      errors.kek = "Riwayat kehamilan ibu (KEK) wajib dipilih.";
     }
     if (!sumberAir) {
       errors.air = "Sumber air bersih wajib dipilih.";
@@ -700,48 +1070,40 @@ async function createPrediksi(req, res, next) {
         ? String(body.kodeKeluarga).trim()
         : await generateKodeKeluarga();
 
-    const kepalaKeluarga =
-      body.kepalaKeluarga && String(body.kepalaKeluarga).trim()
-        ? String(body.kepalaKeluarga).trim()
-        : `Keluarga ${kodeKeluarga}`;
+    // 8 Fitur Model Prediksi Tervalidasi
+    const fiturModel = {
+      pendapatan: Math.round(pendapatan),
+      statusSosialEkonomi,
+      pendidikan: pendidikanIbu,
+      sanitasi: kondisiSanitasi,
+      air: sumberAir,
+      usiaIbu,
+      asiEksklusif,
+      praktikMpasi,
+    };
 
-    const namaBalita =
-      body.namaBalita && String(body.namaBalita).trim()
-        ? String(body.namaBalita).trim()
-        : `Balita ${kodeKeluarga}`;
+    // Data Antropometri & Pendukung KIA
+    const dataKia = {
+      usiaBulan: Math.round(usiaBulan),
+      tinggiBadan,
+      beratBadan,
+      tinggiBadanIbu,
+      beratLahirGram,
+    };
 
-    const nikBalita =
-      body.nikBalita && String(body.nikBalita).trim()
-        ? String(body.nikBalita).trim()
-        : null;
-
-    const jenisKelamin =
-      body.jenisKelamin && String(body.jenisKelamin).trim()
-        ? String(body.jenisKelamin).trim()
-        : "Laki-laki";
-
-    const rt =
-      body.rt && String(body.rt).trim() ? String(body.rt).trim() : "RT 01";
-
-    const mlResult = await callMlOrFallback(
-      {
-        usiaBulan: Math.round(usiaBulan),
-        tinggiBadan: body.tinggiBadan,
-        beratBadan: body.beratBadan,
-        pendapatan: Math.round(pendapatan),
-        pendidikanIbu,
-        riwayatKehamilan,
-        sumberAir,
-        kondisiSanitasi,
-      },
-      dusun
-    );
+    const mlResult = await callMlOrFallback(fiturModel, dataKia, dusun);
 
     const created = await prisma.skriningStunting.create({
       data: {
         kodeKeluarga,
-        kepalaKeluarga,
-        namaBalita,
+        noKk,
+        kepalaKeluarga: kepalaKeluarga || `Keluarga ${kodeKeluarga}`,
+        namaIbu:
+          namaIbu ||
+          (kepalaKeluarga
+            ? `Ibu (${kepalaKeluarga.replace(/^Bpk\.\s*/i, "")})`
+            : `Ibu ${kodeKeluarga}`),
+        namaBalita: namaBalita || `Balita ${kodeKeluarga}`,
         nikBalita,
         jenisKelamin,
         rt,
@@ -753,10 +1115,16 @@ async function createPrediksi(req, res, next) {
         statusTb: mlResult.statusTb,
         statusBb: mlResult.statusBb,
         pendapatan: Math.round(pendapatan),
+        statusSosialEkonomi,
         pendidikanIbu,
+        usiaIbu,
         riwayatKehamilan,
         sumberAir,
         kondisiSanitasi,
+        asiEksklusif,
+        praktikMpasi,
+        tinggiBadanIbu,
+        beratLahirGram,
         statusRisiko: mlResult.statusRisiko,
         keyakinanModel: mlResult.keyakinanModel,
         ambangKritis: mlResult.ambangKritis,
@@ -837,6 +1205,8 @@ async function getRiwayat(req, res, next) {
         { kepalaKeluarga: { contains: trimmedSearch } },
         { namaBalita: { contains: trimmedSearch } },
         { kodeKeluarga: { contains: trimmedSearch } },
+        { noKk: { contains: trimmedSearch } },
+        { namaIbu: { contains: trimmedSearch } },
       ];
     }
 
@@ -876,13 +1246,19 @@ async function getRiwayat(req, res, next) {
       return {
         id: row.id,
         kodeKeluarga,
+        noKk: row.noKk || "-",
         tanggal,
         jam,
         kepala: row.kepalaKeluarga || "-",
+        namaIbu: row.namaIbu || "-",
         balita: `${namaBalita} (${row.usiaBulan} bln)`,
+        namaBalita,
+        usiaBulan: row.usiaBulan,
         rw: row.dusun?.rw || "-",
         rt: row.rt || "RT 01",
         risiko: toTitleCaseRisk(row.statusRisiko),
+        statusRisiko: row.statusRisiko,
+        statusSosialEkonomi: row.statusSosialEkonomi || "-",
         faktor:
           row.faktorDominan ||
           (Array.isArray(row.faktorDetail) && row.faktorDetail[0]?.label) ||
@@ -913,4 +1289,3 @@ module.exports = {
   getPrediksiById,
   getRiwayat,
 };
-

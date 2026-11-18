@@ -139,7 +139,9 @@ async function getDataKeluargaAparatur(req, res, next) {
             (k.kepalaKeluarga &&
               k.kepalaKeluarga.toLowerCase().includes(searchTerm)) ||
             (k.namaBalita && k.namaBalita.toLowerCase().includes(searchTerm)) ||
-            (k.kodeKeluarga && k.kodeKeluarga.toLowerCase().includes(searchTerm))
+            (k.kodeKeluarga && k.kodeKeluarga.toLowerCase().includes(searchTerm)) ||
+            (k.noKk && k.noKk.toLowerCase().includes(searchTerm)) ||
+            (k.namaIbu && k.namaIbu.toLowerCase().includes(searchTerm))
         );
       }
       filteredSkrining.push(...skrining);
