@@ -192,6 +192,11 @@ async function getUsers(req, res, next) {
       }
     }
 
+    const statusParam = status.trim().toLowerCase();
+    if (statusParam === "nonaktif") {
+      where.id = { in: [] };
+    }
+
     const searchQuery = search.trim();
     if (searchQuery) {
       where.OR = [
@@ -215,7 +220,7 @@ async function getUsers(req, res, next) {
       orderBy = { id: direction };
     }
 
-    const [total, users] = await Promise.all([
+    const [total, users, totalUsers, usersByRole] = await Promise.all([
       prisma.user.count({ where }),
       prisma.user.findMany({
         where,
@@ -240,15 +245,30 @@ async function getUsers(req, res, next) {
         skip: (currentPage - 1) * pageSize,
         take: pageSize,
       }),
+      prisma.user.count(),
+      prisma.user.groupBy({
+        by: ["role"],
+        _count: { role: true },
+      }),
     ]);
 
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const items = users.map(formatUserForResponse);
+    const summary = {
+      total: totalUsers,
+      aktif: totalUsers,
+      nonaktif: 0,
+      peran: { Kader: 0, Aparatur: 0, Admin: 0 },
+    };
+    usersByRole.forEach((group) => {
+      summary.peran[toTitleCaseRole(group.role)] = group._count.role;
+    });
 
     return res.status(200).json({
       success: true,
       message: "Daftar pengguna berhasil diambil",
       data: {
+        summary,
         items,
         meta: {
           page: currentPage,
@@ -565,6 +585,11 @@ async function getDataset(req, res, next) {
         { namaIbu: { contains: searchQuery } },
         { namaBalita: { contains: searchQuery } },
       ];
+
+      const balitaIdMatch = searchQuery.match(/^(?:BLT-)?(\d+)$/i);
+      if (balitaIdMatch) {
+        where.OR.push({ id: Number(balitaIdMatch[1]) });
+      }
     }
 
     // Urutan / sorting

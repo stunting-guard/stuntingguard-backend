@@ -195,9 +195,9 @@ Response 200:
 
 | Method | Endpoint | Role |
 | --- | --- | --- |
-| GET | `/api/kader/dashboard?kecamatan=&desa=&periode=&page=1&limit=5` | KADER |
+| GET | `/api/kader/dashboard?kecamatan=&desa=&start_date=&end_date=&page=1&limit=5` | KADER |
 
-Query mengikuti state filter: `kecamatan`, `desa`, `periode`, `page`, `limit` (`PAGE_SIZE = 5`). Filter kosong = semua.
+Query mengikuti state filter: `kecamatan`, `desa`, `start_date`, `end_date`, `page`, `limit` (`PAGE_SIZE = 5`). Tanggal memakai format `YYYY-MM-DD`; tanggal mulai dan akhir bersifat inklusif, dan tanggal akhir mencakup seluruh hari. Salah satu tanggal boleh dikosongkan. Jika keduanya kosong, semua periode ditampilkan. Filter tanggal lama `periode`, `bulan`, dan `tahun` tetap didukung untuk kompatibilitas.
 
 Response 200 (key mengikuti `SUMMARY`, `PRIORITAS`, `FAKTOR`, `SEBARAN_RW`):
 
@@ -431,7 +431,7 @@ Response 200 (key mengikuti objek `DUSUN`):
 
 | Method | Endpoint | Role |
 | --- | --- | --- |
-| GET | `/api/aparatur/data-keluarga?periode=` | APARATUR |
+| GET | `/api/aparatur/data-keluarga?search=&zona=` | APARATUR |
 
 Response 200 (key mengikuti `MOCK_DUSUN` & `MOCK_FAKTOR`):
 
@@ -455,7 +455,7 @@ Response 200 (key mengikuti `MOCK_DUSUN` & `MOCK_FAKTOR`):
 }
 ```
 
-Ringkasan kartu (total/rendah/sedang/tinggi) dihitung frontend dari `dusun[]`. Tombol **Cetak** = `window.print()` (client-side); **Unduh Laporan** = §6.
+`zona` menerima `Semua`, `Merah`, `Kuning`, atau `Hijau`. Zona spesifik hanya mengembalikan dusun yang memiliki skrining pada zona tersebut dan skrining yang cocok: Merah/TINGGI, Kuning/SEDANG, Hijau/RENDAH. Total/rendah/sedang/tinggi serta faktor dihitung dari skrining yang sama; faktor bernilai 0 bila tidak ada data cocok. Ringkasan kartu dihitung frontend dari `dusun[]`. Tombol **Cetak** = `window.print()` (client-side); **Unduh Laporan** = §6 dan mengirim zona aktif.
 
 ### 4.3 Peta Wilayah — `PetaWilayah.jsx`
 
@@ -593,7 +593,30 @@ Response 200 (key mengikuti `MOCK_RINGKASAN`, `MOCK_WILAYAH`, `MOCK_BALITA_PRIOR
 
 ## 5. Admin
 
-`pages/admin/DashboardAdmin.jsx` hanya placeholder (`"Console Admin & ML"`), belum ada form/tabel. **Tidak ada endpoint admin** pada kontrak ini. Tambahkan saat halaman admin benar-benar dibuat.
+### 5.1 Kelola Pengguna — `pages/admin/KelolaPengguna.jsx`
+
+Seluruh endpoint berikut memerlukan `Authorization: Bearer <jwt>` dan role `ADMIN`.
+
+| Method | Endpoint | Query / body |
+| --- | --- | --- |
+| GET | `/api/admin/users` | `search`, `role`, `status`, `page`, `limit`, `sortKey`, `sortDir` |
+| POST | `/api/admin/users` | `{ name, email, password?, role, dusunId? }` |
+| PUT | `/api/admin/users/:id` | `{ name?, email?, role?, dusunId? }` |
+| PATCH | `/api/admin/users/:id/reset-password` | `{}` atau `{ newPassword }` |
+| DELETE | `/api/admin/users/:id` | — |
+
+`GET` merespons `data.items`, `data.meta { page, limit, total, totalPages }`, dan
+`data.summary { total, aktif, nonaktif, peran }`. Role request memakai enum
+`ADMIN|APARATUR|KADER`; item juga menyertakan label `peran`. `username` diturunkan
+dari bagian email sebelum `@`, bukan kolom yang dapat diubah terpisah.
+
+Schema `User` saat ini tidak mempunyai kolom status akun; respons menandai seluruh
+akun sebagai `Aktif`. Filter `status=Nonaktif` karena itu menghasilkan daftar kosong,
+bukan akun nonaktif yang tersimpan. Perubahan status akun memerlukan dukungan schema
+dan backend yang terpisah.
+
+`POST` dapat mengembalikan `data.temporaryPassword` ketika sandi dibuat otomatis.
+`PATCH` mengembalikan sandi sementara tersebut di `data.temporaryPassword`.
 
 ---
 
@@ -601,10 +624,12 @@ Response 200 (key mengikuti `MOCK_RINGKASAN`, `MOCK_WILAYAH`, `MOCK_BALITA_PRIOR
 
 | Method | Endpoint | Role |
 | --- | --- | --- |
-| GET | `/api/laporan/export?module=&format=&kecamatan=&desa=&periode=&rw=&risiko=` | KADER, APARATUR |
+| GET | `/api/laporan/export?module=&format=&kecamatan=&desa=&periode=&rw=&risiko=&zona=&start_date=&end_date=` | KADER, APARATUR |
 
 - `module`: `kader-dashboard` | `data-keluarga` | `laporan`
 - `format`: `xlsx` | `pdf`
+- `zona` (opsional): `Merah` | `Kuning` | `Hijau`; membatasi dusun dan skrining secara eksklusif sesuai pemetaan zona ke status risiko.
+- `start_date` dan `end_date` (opsional): format `YYYY-MM-DD`; bila dikirim, ekspor dibatasi ke rentang tanggal inklusif yang sama dengan Dashboard Analitik.
 - Response **binary** (`Content-Disposition: attachment; filename="..."`), bukan envelope JSON.
 - Error tetap memakai envelope JSON.
 - Titik pemakaian: `DashboardAnalitik.jsx` (`Unduh Laporan`), `DataKeluarga.jsx` (`Unduh Laporan`), `Laporan.jsx` (`Ekspor Excel (.xlsx)`). Tombol `Cetak` memakai `window.print()` dan tidak butuh endpoint.
@@ -688,3 +713,8 @@ Prioritas: **CRITICAL** = memblokir alur utama; **HIGH** = data tidak bisa ditam
 | 13 | GET | `/api/aparatur/hasil-prediksi/:id` | APARATUR | HasilPrediksi |
 | 14 | GET | `/api/aparatur/laporan` | APARATUR | Laporan |
 | 15 | GET | `/api/laporan/export` | KADER/APARATUR | DashboardAnalitik, DataKeluarga, Laporan |
+| 16 | GET | `/api/admin/users` | ADMIN | KelolaPengguna |
+| 17 | POST | `/api/admin/users` | ADMIN | KelolaPengguna |
+| 18 | PUT | `/api/admin/users/:id` | ADMIN | KelolaPengguna |
+| 19 | PATCH | `/api/admin/users/:id/reset-password` | ADMIN | KelolaPengguna |
+| 20 | DELETE | `/api/admin/users/:id` | ADMIN | KelolaPengguna |
