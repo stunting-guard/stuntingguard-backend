@@ -1,0 +1,150 @@
+{
+  "versiModel": "Random Forest Classifier v2.0 (scikit-learn)",
+  "algoritma": "Random Forest (n_estimators=100, max_depth=12, criterion='gini', balanced)",
+  "totalDataLatih": 372,
+  "dataLatihRiilMySQL": 12,
+  "dataLatihReferensi": 360,
+  "totalUji": 372,
+  "tpTotal": 296,
+  "akurasi": 79.6,
+  "presisi": 71.6,
+  "recall": 68.3,
+  "f1Score": 69.6,
+  "errorRate": 20.4,
+  "featureImportance": [
+    {
+      "fitur": "Pendapatan Keluarga",
+      "bobot": 21.7,
+      "rawKey": "pendapatan"
+    },
+    {
+      "fitur": "Status Sosial Ekonomi (PKH/BPNT)",
+      "bobot": 17.8,
+      "rawKey": "statusSosialEkonomi"
+    },
+    {
+      "fitur": "Kondisi Sanitasi & Jamban",
+      "bobot": 14.8,
+      "rawKey": "sanitasi"
+    },
+    {
+      "fitur": "Akses Sumber Air Bersih",
+      "bobot": 12.7,
+      "rawKey": "air"
+    },
+    {
+      "fitur": "Tingkat Pendidikan Ibu",
+      "bobot": 9.0,
+      "rawKey": "pendidikan"
+    },
+    {
+      "fitur": "Usia Reproduksi Ibu",
+      "bobot": 9.0,
+      "rawKey": "usiaIbu"
+    },
+    {
+      "fitur": "Praktik Pemberian MPASI",
+      "bobot": 8.3,
+      "rawKey": "praktikMpasi"
+    },
+    {
+      "fitur": "Pemberian ASI Eksklusif",
+      "bobot": 6.8,
+      "rawKey": "asiEksklusif"
+    }
+  ],
+  "matrix": [
+    {
+      "aktual": "Rendah",
+      "cells": [
+        {
+          "n": 18,
+          "label": "True Positive (47.4%)",
+          "diagonal": true
+        },
+        {
+          "n": 20,
+          "label": "Deviasi Sedang",
+          "diagonal": false
+        },
+        {
+          "n": 0,
+          "label": "Deviasi Tinggi",
+          "diagonal": false
+        }
+      ]
+    },
+    {
+      "aktual": "Sedang",
+      "cells": [
+        {
+          "n": 11,
+          "label": "Deviasi Rendah",
+          "diagonal": false
+        },
+        {
+          "n": 70,
+          "label": "True Positive (66.7%)",
+          "diagonal": true
+        },
+        {
+          "n": 24,
+          "label": "Deviasi Tinggi",
+          "diagonal": false
+        }
+      ]
+    },
+    {
+      "aktual": "Tinggi",
+      "cells": [
+        {
+          "n": 0,
+          "label": "Deviasi Rendah",
+          "diagonal": false
+        },
+        {
+          "n": 21,
+          "label": "Deviasi Sedang",
+          "diagonal": false
+        },
+        {
+          "n": 208,
+          "label": "True Positive (90.8%)",
+          "diagonal": true
+        }
+      ]
+    }
+  ],
+  "perKategori": [
+    {
+      "label": "Risiko Rendah (Normal)",
+      "dot": "bg-teal-600",
+      "sampel": 38,
+      "presisi": 62.1,
+      "recall": 47.4,
+      "f1": 53.7
+    },
+    {
+      "label": "Risiko Sedang (Stunted)",
+      "dot": "bg-amber-500",
+      "sampel": 105,
+      "presisi": 63.1,
+      "recall": 66.7,
+      "f1": 64.8
+    },
+    {
+      "label": "Risiko Tinggi (Severely Stunted)",
+      "dot": "bg-red-500",
+      "sampel": 229,
+      "presisi": 89.7,
+      "recall": 90.8,
+      "f1": 90.2
+    }
+  ],
+  "classes": [
+    "RENDAH",
+    "SEDANG",
+    "TINGGI"
+  ],
+  "engine": "scikit-learn RandomForestClassifier"
+}

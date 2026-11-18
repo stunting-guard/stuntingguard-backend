@@ -81,8 +81,17 @@ async function getFormOptions(req, res, next) {
 
 async function getWilayah(req, res, next) {
   try {
+    const dusunQueryWhere = {};
+    // Pembatasan wilayah untuk role KADER (Kunci wilayah hanya ke dusun penugasannya)
+    if (req.user?.role === "KADER") {
+      if (req.user.dusunId) {
+        dusunQueryWhere.id = req.user.dusunId;
+      }
+    }
+
     const [dusunList, skriningDates] = await Promise.all([
       prisma.dusun.findMany({
+        where: dusunQueryWhere,
         orderBy: { id: "asc" },
         select: {
           id: true,

@@ -10,7 +10,7 @@ const router = express.Router();
 router.post(
   "/",
   verifyToken,
-  authorizeRoles("KADER", "APARATUR", "ADMIN"),
+  authorizeRoles("KADER", "ADMIN"),
   createPrediksi
 );
 

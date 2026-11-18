@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const { parseZonaFilter } = require("../utils/zonaFilter");
+const { callMlOrFallback } = require("./prediksiController");
 
 function toTitleCaseZona(zona) {
   if (!zona) return "Hijau";
@@ -503,10 +504,147 @@ async function getLaporanAparatur(req, res, next) {
   }
 }
 
+// 6. Klasifikasi Ulang Satu Data Skrining oleh Aparatur (POST /api/aparatur/klasifikasi-ulang/:id)
+async function reclassifySkriningAparatur(req, res, next) {
+  try {
+    const { id } = req.params;
+    const skriningId = parseInt(id, 10);
+    if (isNaN(skriningId)) {
+      return res.status(400).json({
+        success: false,
+        message: "ID skrining tidak valid",
+      });
+    }
+
+    const record = await prisma.skriningStunting.findUnique({
+      where: { id: skriningId },
+      include: { dusun: true },
+    });
+
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        message: "Data skrining tidak ditemukan",
+      });
+    }
+
+    const fiturModel = {
+      pendapatan: record.pendapatan,
+      statusSosialEkonomi: record.statusSosialEkonomi,
+      pendidikanIbu: record.pendidikanIbu,
+      sumberAir: record.sumberAir,
+      kondisiSanitasi: record.kondisiSanitasi,
+      usiaIbu: record.usiaIbu,
+      asiEksklusif: record.asiEksklusif,
+      praktikMpasi: record.praktikMpasi,
+      riwayatKehamilan: record.riwayatKehamilan,
+    };
+
+    const antropometri = {
+      usiaBulan: record.usiaBulan,
+      tinggiBadan: record.tinggiBadan,
+      beratBadan: record.beratBadan,
+    };
+
+    const hasil = await callMlOrFallback(fiturModel, antropometri, record.dusun);
+
+    const updated = await prisma.skriningStunting.update({
+      where: { id: skriningId },
+      data: {
+        statusRisiko: hasil.statusRisiko,
+        keyakinanModel: hasil.keyakinanModel,
+        ambangKritis: hasil.ambangKritis,
+        prioritas: hasil.prioritas,
+        faktorDominan: hasil.faktorDominan,
+        probabilitas: hasil.probabilitas,
+        faktorDetail: hasil.faktorDetail,
+        rekomendasiDetail: hasil.rekomendasiDetail,
+        rencanaIntervensi: hasil.rencanaIntervensi,
+      },
+      include: { dusun: true },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Data skrining ${updated.kodeKeluarga || updated.id} berhasil diklasifikasi ulang dengan Random Forest`,
+      data: updated,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+// 7. Proses Klasifikasi Ulang Massal oleh Aparatur (POST /api/aparatur/proses-prediksi)
+async function batchProcessPrediksiAparatur(req, res, next) {
+  try {
+    const { dusunId } = req.body || {};
+    const where = {};
+    if (dusunId) {
+      where.dusunId = parseInt(dusunId, 10);
+    }
+
+    const records = await prisma.skriningStunting.findMany({
+      where,
+      include: { dusun: true },
+    });
+
+    let processedCount = 0;
+    for (const record of records) {
+      const fiturModel = {
+        pendapatan: record.pendapatan,
+        statusSosialEkonomi: record.statusSosialEkonomi,
+        pendidikanIbu: record.pendidikanIbu,
+        sumberAir: record.sumberAir,
+        kondisiSanitasi: record.kondisiSanitasi,
+        usiaIbu: record.usiaIbu,
+        asiEksklusif: record.asiEksklusif,
+        praktikMpasi: record.praktikMpasi,
+        riwayatKehamilan: record.riwayatKehamilan,
+      };
+
+      const antropometri = {
+        usiaBulan: record.usiaBulan,
+        tinggiBadan: record.tinggiBadan,
+        beratBadan: record.beratBadan,
+      };
+
+      const hasil = await callMlOrFallback(fiturModel, antropometri, record.dusun);
+
+      await prisma.skriningStunting.update({
+        where: { id: record.id },
+        data: {
+          statusRisiko: hasil.statusRisiko,
+          keyakinanModel: hasil.keyakinanModel,
+          ambangKritis: hasil.ambangKritis,
+          prioritas: hasil.prioritas,
+          faktorDominan: hasil.faktorDominan,
+          probabilitas: hasil.probabilitas,
+          faktorDetail: hasil.faktorDetail,
+          rekomendasiDetail: hasil.rekomendasiDetail,
+          rencanaIntervensi: hasil.rencanaIntervensi,
+        },
+      });
+      processedCount++;
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Berhasil memproses ulang ${processedCount} data skrining dengan model Random Forest`,
+      data: {
+        totalDiproses: processedCount,
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   getDashboardAparatur,
   getDataKeluargaAparatur,
   getPetaWilayahAparatur,
   getHasilPrediksiDetailAparatur,
   getLaporanAparatur,
+  reclassifySkriningAparatur,
+  batchProcessPrediksiAparatur,
 };

@@ -175,30 +175,62 @@ async function getDashboard(req, res, next) {
     const pageSize = Math.max(1, parseInt(limit, 10) || 5);
 
     const dusunFilter = {};
-    if (
-      kecamatan &&
-      !String(kecamatan).toLowerCase().includes("semua")
-    ) {
-      dusunFilter.kecamatan = String(kecamatan).trim();
-    }
 
-    const dusunQuery = String(dusun || desa).trim();
-    if (
-      dusunQuery &&
-      !dusunQuery.toLowerCase().includes("semua") &&
-      !dusunQuery.toLowerCase().startsWith("desa ")
-    ) {
-      const matchedDusun = await prisma.dusun.findFirst({
-        where: {
-          OR: [
-            { nama: { contains: dusunQuery } },
-            { namaSingkat: { contains: dusunQuery } },
-            { rw: dusunQuery },
-          ],
-        },
-      });
-      if (matchedDusun) {
-        dusunFilter.id = matchedDusun.id;
+    // Pembatasan wilayah untuk role KADER (Hanya melihat data dusun penugasannya)
+    if (req.user?.role === "KADER") {
+      if (!req.user.dusunId) {
+        return res.status(200).json({
+          success: true,
+          message: "Data dashboard berhasil diambil (Kader belum memiliki penugasan dusun)",
+          data: {
+            summary: {
+              totalKK: 0,
+              tinggi: 0,
+              sedang: 0,
+              rendah: 0,
+              persenTinggi: 0,
+            },
+            prioritas: {
+              items: [],
+              meta: {
+                page: 1,
+                limit: pageSize,
+                total: 0,
+                totalPages: 1,
+              },
+            },
+            faktorDominan: [],
+            sebaranRw: [],
+          },
+        });
+      }
+      dusunFilter.id = req.user.dusunId;
+    } else {
+      if (
+        kecamatan &&
+        !String(kecamatan).toLowerCase().includes("semua")
+      ) {
+        dusunFilter.kecamatan = String(kecamatan).trim();
+      }
+
+      const dusunQuery = String(dusun || desa).trim();
+      if (
+        dusunQuery &&
+        !dusunQuery.toLowerCase().includes("semua") &&
+        !dusunQuery.toLowerCase().startsWith("desa ")
+      ) {
+        const matchedDusun = await prisma.dusun.findFirst({
+          where: {
+            OR: [
+              { nama: { contains: dusunQuery } },
+              { namaSingkat: { contains: dusunQuery } },
+              { rw: dusunQuery },
+            ],
+          },
+        });
+        if (matchedDusun) {
+          dusunFilter.id = matchedDusun.id;
+        }
       }
     }
 

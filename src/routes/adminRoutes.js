@@ -48,6 +48,7 @@ router.delete("/dataset/:id", deleteDataset);
 
 // 5. Evaluasi & Retrain Model ML
 router.get("/ml/evaluasi", getEvaluasiModel);
+router.get("/ml/evaluation", getEvaluasiModel);
 router.post("/ml/retrain", retrainModel);
 
 module.exports = router;

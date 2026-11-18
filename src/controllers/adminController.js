@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const axios = require("axios");
 const prisma = require("../config/prisma");
+const { trainRandomForest } = require("../services/mlService");
 
 const ROLE_MAP = {
   kader: "KADER",
@@ -1439,141 +1440,88 @@ async function deleteDusun(req, res, next) {
 // GET /api/admin/ml/evaluasi
 async function getEvaluasiModel(req, res, next) {
   try {
-    const totalDataLatih = await prisma.skriningStunting.count();
+    const totalDataLatihRiil = await prisma.skriningStunting.count();
 
     let latestEval = await prisma.modelEvaluation.findFirst({
       orderBy: { createdAt: "desc" },
     });
 
-    // Jika belum ada record evaluasi di database, buat baseline dari data riil
     if (!latestEval) {
-      const TOTAL_UJI = Math.max(100, Math.round(totalDataLatih * 0.3));
-      const TP_TOTAL = Math.round(TOTAL_UJI * 0.924);
-      const errorRate = Number((((TOTAL_UJI - TP_TOTAL) / TOTAL_UJI) * 100).toFixed(1));
+      const skriningList = await prisma.skriningStunting.findMany({
+        select: {
+          id: true,
+          statusRisiko: true,
+          kondisiSanitasi: true,
+          sumberAir: true,
+          pendapatan: true,
+          statusSosialEkonomi: true,
+          praktikMpasi: true,
+          asiEksklusif: true,
+          usiaIbu: true,
+          pendidikanIbu: true,
+        },
+      });
+
+      const trainResult = await trainRandomForest(skriningList);
 
       const metrics = [
         {
           key: "akurasi",
           label: "Akurasi (Accuracy)",
-          value: "92,4%",
-          suffix: "+1,2% baseline",
-          note: "Performa Sangat Tinggi & Konsisten",
+          value: `${trainResult.akurasi.toFixed(1).replace(".", ",")}%`,
+          suffix: "scikit-learn RF",
+          note: "Performa Klasifikasi Model Terlatih",
           icon: "Settings",
           tone: "bg-slate-100 text-slate-600",
         },
         {
           key: "presisi",
           label: "Presisi (Precision)",
-          value: "91,8%",
+          value: `${trainResult.presisi.toFixed(1).replace(".", ",")}%`,
           suffix: "Macro Avg",
-          note: "Minim Kasus False Positive",
+          note: "Presisi Rata-Rata Multi-Kelas",
           icon: "Target",
           tone: "bg-sky-50 text-sky-700",
         },
         {
           key: "recall",
           label: "Recall (Sensitivitas)",
-          value: "93,1%",
-          suffix: "Tinggi",
-          note: "Deteksi Balita Risiko Maksimal",
+          value: `${trainResult.recall.toFixed(1).replace(".", ",")}%`,
+          suffix: "Macro Avg",
+          note: "Sensitivitas Deteksi Kasus Balita Stunting",
           icon: "ShieldCheck",
           tone: "bg-teal-50 text-teal-700",
         },
         {
           key: "f1",
           label: "F1-Score",
-          value: "92,4%",
+          value: `${trainResult.f1Score.toFixed(1).replace(".", ",")}%`,
           suffix: "Harmonic Mean",
-          note: "Keseimbangan Model Optimal",
+          note: "Keseimbangan Model Klasifikasi Optimal",
           icon: "SlidersHorizontal",
           tone: "bg-indigo-50 text-indigo-600",
         },
       ];
 
-      const matrix = [
-        {
-          aktual: "Rendah",
-          cells: [
-            { n: 1198, label: "True Positive (84,3%)", diagonal: true },
-            { n: 52, label: "Deviasi Sedang" },
-            { n: 20, label: "Deviasi Tinggi" },
-          ],
-        },
-        {
-          aktual: "Sedang",
-          cells: [
-            { n: 41, label: "Deviasi Rendah" },
-            { n: 724, label: "True Positive (90,2%)", diagonal: true },
-            { n: 38, label: "Deviasi Tinggi" },
-          ],
-        },
-        {
-          aktual: "Tinggi",
-          cells: [
-            { n: 14, label: "Deviasi Rendah" },
-            { n: 31, label: "Deviasi Sedang" },
-            { n: 450, label: "True Positive (90,9%)", diagonal: true },
-          ],
-        },
-      ];
-
-      const perKategori = [
-        {
-          label: "Risiko Rendah (Normal)",
-          dot: "bg-teal-600",
-          sampel: 1270,
-          presisi: 95.6,
-          recall: 94.3,
-          f1: 94.9,
-        },
-        {
-          label: "Risiko Sedang (Stunted)",
-          dot: "bg-amber-500",
-          sampel: 803,
-          presisi: 89.7,
-          recall: 90.2,
-          f1: 89.9,
-        },
-        {
-          label: "Risiko Tinggi (Severely Stunted)",
-          dot: "bg-red-500",
-          sampel: 495,
-          presisi: 88.6,
-          recall: 90.9,
-          f1: 89.7,
-        },
-      ];
-
-      const featureImportance = [
-        { fitur: "Kondisi Sanitasi & Jamban", bobot: 28.5 },
-        { fitur: "Akses Sumber Air Bersih", bobot: 22.4 },
-        { fitur: "Pendapatan Keluarga", bobot: 16.2 },
-        { fitur: "Status Sosial Ekonomi (PKH/BPNT)", bobot: 11.5 },
-        { fitur: "Praktik Pemberian MPASI", bobot: 8.4 },
-        { fitur: "Pemberian ASI Eksklusif", bobot: 6.2 },
-        { fitur: "Usia Reproduksi Ibu", bobot: 4.1 },
-        { fitur: "Tingkat Pendidikan Ibu", bobot: 2.7 },
-      ];
-
       latestEval = await prisma.modelEvaluation.create({
         data: {
-          versiModel: "Random Forest Classifier v1.2",
-          algoritma: "Random Forest (n_estimators=100, max_depth=12, criterion='gini')",
-          totalDataLatih,
-          totalUji: TOTAL_UJI,
-          tpTotal: TP_TOTAL,
-          akurasi: 92.4,
-          presisi: 91.8,
-          recall: 93.1,
-          f1Score: 92.4,
-          errorRate,
+          versiModel: trainResult.versiModel,
+          algoritma: trainResult.algoritma,
+          totalDataLatih: trainResult.totalDataLatih,
+          totalUji: trainResult.totalUji,
+          tpTotal: trainResult.tpTotal,
+          akurasi: trainResult.akurasi,
+          presisi: trainResult.presisi,
+          recall: trainResult.recall,
+          f1Score: trainResult.f1Score,
+          errorRate: trainResult.errorRate,
           metrics,
-          confusionMatrix: matrix,
-          perKategori,
-          featureImportance,
+          confusionMatrix: trainResult.matrix,
+          perKategori: trainResult.perKategori,
+          featureImportance: trainResult.featureImportance,
           waktuTraining: new Date(),
           status: "COMPLETED",
-          catatan: "Model evaluasi baseline inisial",
+          catatan: `Model evaluasi inisial scikit-learn. Total: ${trainResult.totalDataLatih} data.`,
         },
       });
     }
@@ -1586,7 +1534,8 @@ async function getEvaluasiModel(req, res, next) {
       data: {
         versiModel: latestEval.versiModel,
         algoritma: latestEval.algoritma,
-        totalDataLatih,
+        totalDataLatih: latestEval.totalDataLatih,
+        totalDataLatihRiil,
         totalUji: latestEval.totalUji,
         tpTotal: latestEval.tpTotal,
         errorRate: latestEval.errorRate,
@@ -1610,11 +1559,8 @@ async function getEvaluasiModel(req, res, next) {
 // POST /api/admin/ml/retrain
 async function retrainModel(req, res, next) {
   try {
-    const mlRetrainUrl =
-      process.env.ML_RETRAIN_URL || "http://localhost:8000/retrain";
-
-    // 1. Baca data skrining balita riil dari database MySQL
-    const [totalDataLatih, skriningList] = await Promise.all([
+    // 1. Ambil seluruh data riil skrining dari database MySQL
+    const [totalDataLatihRiil, skriningList] = await Promise.all([
       prisma.skriningStunting.count(),
       prisma.skriningStunting.findMany({
         select: {
@@ -1632,118 +1578,41 @@ async function retrainModel(req, res, next) {
       }),
     ]);
 
-    let retrainResult = null;
-    let mlMode = "ONLINE_SERVICE";
-
-    try {
-      const response = await axios.post(
-        mlRetrainUrl,
-        {
-          datasetCount: totalDataLatih,
-          records: skriningList.slice(0, 500),
-        },
-        { timeout: 3000 }
-      );
-      retrainResult = response.data;
-    } catch (e) {
-      mlMode = "DYNAMIC_EVALUATION";
-    }
-
-    // Hitung distribusi kelas riil dari database
-    let countTinggi = 0;
-    let countSedang = 0;
-    let countRendah = 0;
-    skriningList.forEach((s) => {
-      if (s.statusRisiko === "TINGGI") countTinggi += 1;
-      else if (s.statusRisiko === "SEDANG") countSedang += 1;
-      else countRendah += 1;
-    });
-
-    const datasetSize = Math.max(totalDataLatih, 1);
-    const pRendahRatio = countRendah / datasetSize;
-    const pSedangRatio = countSedang / datasetSize;
-    const pTinggiRatio = countTinggi / datasetSize;
-
-    const totalUji = Math.max(100, Math.round(datasetSize * 0.3));
-
-    const nRendahUji = Math.max(20, Math.round(totalUji * (pRendahRatio || 0.49)));
-    const nSedangUji = Math.max(15, Math.round(totalUji * (pSedangRatio || 0.31)));
-    const nTinggiUji = Math.max(10, totalUji - nRendahUji - nSedangUji);
-
-    const akurasiDinamis = Number(
-      Math.min(96.8, Math.max(91.2, 92.4 + ((datasetSize % 23) * 0.15))).toFixed(1)
-    );
-    const presisiDinamis = Number((akurasiDinamis - 0.5).toFixed(1));
-    const recallDinamis = Number((akurasiDinamis + 0.6).toFixed(1));
-    const f1Dinamis = Number(
-      ((2 * (presisiDinamis * recallDinamis)) / (presisiDinamis + recallDinamis)).toFixed(1)
-    );
-
-    const tpRendah = Math.round(nRendahUji * (akurasiDinamis / 100));
-    const tpSedang = Math.round(nSedangUji * ((akurasiDinamis - 1.5) / 100));
-    const tpTinggi = Math.round(nTinggiUji * ((akurasiDinamis - 2.0) / 100));
-    const tpTotal = tpRendah + tpSedang + tpTinggi;
-    const errorRate = Number((((totalUji - tpTotal) / totalUji) * 100).toFixed(1));
-
-    const matrix = [
-      {
-        aktual: "Rendah",
-        cells: [
-          { n: tpRendah, label: `True Positive (${(tpRendah / nRendahUji * 100).toFixed(1).replace(".", ",")}%)`, diagonal: true },
-          { n: Math.max(1, Math.round((nRendahUji - tpRendah) * 0.65)), label: "Deviasi Sedang" },
-          { n: Math.max(0, nRendahUji - tpRendah - Math.max(1, Math.round((nRendahUji - tpRendah) * 0.65))), label: "Deviasi Tinggi" },
-        ],
-      },
-      {
-        aktual: "Sedang",
-        cells: [
-          { n: Math.max(1, Math.round((nSedangUji - tpSedang) * 0.55)), label: "Deviasi Rendah" },
-          { n: tpSedang, label: `True Positive (${(tpSedang / nSedangUji * 100).toFixed(1).replace(".", ",")}%)`, diagonal: true },
-          { n: Math.max(0, nSedangUji - tpSedang - Math.max(1, Math.round((nSedangUji - tpSedang) * 0.55))), label: "Deviasi Tinggi" },
-        ],
-      },
-      {
-        aktual: "Tinggi",
-        cells: [
-          { n: Math.max(0, Math.round((nTinggiUji - tpTinggi) * 0.35)), label: "Deviasi Rendah" },
-          { n: Math.max(1, Math.round((nTinggiUji - tpTinggi) * 0.65)), label: "Deviasi Sedang" },
-          { n: tpTinggi, label: `True Positive (${(tpTinggi / nTinggiUji * 100).toFixed(1).replace(".", ",")}%)`, diagonal: true },
-        ],
-      },
-    ];
+    // 2. Jalankan pelatihan ulang Random Forest asli dengan scikit-learn
+    const trainResult = await trainRandomForest(skriningList);
 
     const metrics = [
       {
         key: "akurasi",
         label: "Akurasi (Accuracy)",
-        value: `${akurasiDinamis.toFixed(1).replace(".", ",")}%`,
-        suffix: "+0,8% model update",
-        note: "Performa Klasifikasi Sangat Tinggi & Konsisten",
+        value: `${trainResult.akurasi.toFixed(1).replace(".", ",")}%`,
+        suffix: "scikit-learn RF",
+        note: "Performa Klasifikasi Model Terlatih",
         icon: "Settings",
         tone: "bg-slate-100 text-slate-600",
       },
       {
         key: "presisi",
         label: "Presisi (Precision)",
-        value: `${presisiDinamis.toFixed(1).replace(".", ",")}%`,
+        value: `${trainResult.presisi.toFixed(1).replace(".", ",")}%`,
         suffix: "Macro Avg",
-        note: "Minim Kasus False Positive di Lapangan",
+        note: "Presisi Rata-Rata Multi-Kelas",
         icon: "Target",
         tone: "bg-sky-50 text-sky-700",
       },
       {
         key: "recall",
         label: "Recall (Sensitivitas)",
-        value: `${recallDinamis.toFixed(1).replace(".", ",")}%`,
-        suffix: "Tinggi",
-        note: "Sensitif Mendeteksi Kasus Balita Stunting",
+        value: `${trainResult.recall.toFixed(1).replace(".", ",")}%`,
+        suffix: "Macro Avg",
+        note: "Sensitivitas Deteksi Kasus Balita Stunting",
         icon: "ShieldCheck",
         tone: "bg-teal-50 text-teal-700",
       },
       {
         key: "f1",
         label: "F1-Score",
-        value: `${f1Dinamis.toFixed(1).replace(".", ",")}%`,
+        value: `${trainResult.f1Score.toFixed(1).replace(".", ",")}%`,
         suffix: "Harmonic Mean",
         note: "Keseimbangan Model Klasifikasi Optimal",
         icon: "SlidersHorizontal",
@@ -1751,88 +1620,49 @@ async function retrainModel(req, res, next) {
       },
     ];
 
-    const perKategori = [
-      {
-        label: "Risiko Rendah (Normal)",
-        dot: "bg-teal-600",
-        sampel: nRendahUji,
-        presisi: Number((akurasiDinamis + 1.2).toFixed(1)),
-        recall: Number((akurasiDinamis - 0.2).toFixed(1)),
-        f1: Number((akurasiDinamis + 0.5).toFixed(1)),
-      },
-      {
-        label: "Risiko Sedang (Stunted)",
-        dot: "bg-amber-500",
-        sampel: nSedangUji,
-        presisi: Number((presisiDinamis - 1.1).toFixed(1)),
-        recall: Number((recallDinamis - 1.0).toFixed(1)),
-        f1: Number((f1Dinamis - 1.0).toFixed(1)),
-      },
-      {
-        label: "Risiko Tinggi (Severely Stunted)",
-        dot: "bg-red-500",
-        sampel: nTinggiUji,
-        presisi: Number((presisiDinamis - 1.8).toFixed(1)),
-        recall: Number((recallDinamis + 0.8).toFixed(1)),
-        f1: Number((f1Dinamis - 0.6).toFixed(1)),
-      },
-    ];
-
-    const featureImportance = [
-      { fitur: "Kondisi Sanitasi & Jamban", bobot: 28.5 },
-      { fitur: "Akses Sumber Air Bersih", bobot: 22.4 },
-      { fitur: "Pendapatan Keluarga", bobot: 16.2 },
-      { fitur: "Status Sosial Ekonomi (PKH/BPNT)", bobot: 11.5 },
-      { fitur: "Praktik Pemberian MPASI", bobot: 8.4 },
-      { fitur: "Pemberian ASI Eksklusif", bobot: 6.2 },
-      { fitur: "Usia Reproduksi Ibu", bobot: 4.1 },
-      { fitur: "Tingkat Pendidikan Ibu", bobot: 2.7 },
-    ];
-
-    const versiModel = `Random Forest Classifier v1.${Math.floor(Date.now() / 1000) % 1000}`;
     const waktuTraining = new Date();
-
     const savedEval = await prisma.modelEvaluation.create({
       data: {
-        versiModel,
-        algoritma: "Random Forest (n_estimators=100, max_depth=12, criterion='gini')",
-        totalDataLatih,
-        totalUji,
-        tpTotal,
-        akurasi: akurasiDinamis,
-        presisi: presisiDinamis,
-        recall: recallDinamis,
-        f1Score: f1Dinamis,
-        errorRate,
+        versiModel: trainResult.versiModel,
+        algoritma: trainResult.algoritma,
+        totalDataLatih: trainResult.totalDataLatih,
+        totalUji: trainResult.totalUji,
+        tpTotal: trainResult.tpTotal,
+        akurasi: trainResult.akurasi,
+        presisi: trainResult.presisi,
+        recall: trainResult.recall,
+        f1Score: trainResult.f1Score,
+        errorRate: trainResult.errorRate,
         metrics,
-        confusionMatrix: matrix,
-        perKategori,
-        featureImportance,
+        confusionMatrix: trainResult.matrix,
+        perKategori: trainResult.perKategori,
+        featureImportance: trainResult.featureImportance,
         waktuTraining,
         status: "COMPLETED",
-        catatan: `Pelatihan ulang sukses (${mlMode}). Melibatkan ${totalDataLatih} data skrining balita riil.`,
+        catatan: `Pelatihan ulang sukses menggunakan scikit-learn RandomForestClassifier. Total data latih: ${trainResult.totalDataLatih} (${trainResult.dataLatihRiilMySQL} data riil MySQL + ${trainResult.dataLatihReferensi} data referensi desa).`,
       },
     });
 
     return res.status(200).json({
       success: true,
-      message: "Model Random Forest berhasil dilatih ulang dengan data aktual",
+      message: `Model Random Forest berhasil dilatih ulang menggunakan scikit-learn (Akurasi Uji: ${trainResult.akurasi}%)`,
       data: {
         id: savedEval.id,
         versiModel: savedEval.versiModel,
+        akurasi: savedEval.akurasi,
         akurasiBaru: savedEval.akurasi,
-        peningkatanAkurasi: "+0.4%",
+        presisi: savedEval.presisi,
+        recall: savedEval.recall,
+        f1Score: savedEval.f1Score,
         totalDataLatih: savedEval.totalDataLatih,
+        dataLatihRiil: trainResult.dataLatihRiilMySQL,
+        dataLatihReferensi: trainResult.dataLatihReferensi,
         retrainedAt: savedEval.waktuTraining,
         waktuTraining: savedEval.waktuTraining,
-        details: retrainResult || {
-          mode: mlMode,
-          totalUji,
-          tpTotal,
-          errorRate,
-          akurasi: akurasiDinamis,
-          f1Score: f1Dinamis,
-        },
+        engine: "scikit-learn RandomForestClassifier",
+        featureImportance: trainResult.featureImportance,
+        matrix: trainResult.matrix,
+        perKategori: trainResult.perKategori,
       },
     });
   } catch (err) {

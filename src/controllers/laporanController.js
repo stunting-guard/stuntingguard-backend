@@ -49,6 +49,18 @@ async function exportLaporan(req, res, next) {
 
     const where = dateRange.filter ? { createdAt: dateRange.filter } : {};
     const dusunWhere = {};
+
+    if (req.user?.role === "KADER") {
+      if (!req.user.dusunId) {
+        return res.status(403).json({
+          success: false,
+          message: "Akun Kader belum ditugaskan ke dusun manapun.",
+        });
+      }
+      where.dusunId = req.user.dusunId;
+      dusunWhere.id = req.user.dusunId;
+    }
+
     if (zonaFilter.zona) {
       dusunWhere.zona = zonaFilter.zona;
       where.statusRisiko = zonaFilter.statusRisiko;

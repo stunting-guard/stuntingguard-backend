@@ -5,6 +5,8 @@ const {
   getPetaWilayahAparatur,
   getHasilPrediksiDetailAparatur,
   getLaporanAparatur,
+  reclassifySkriningAparatur,
+  batchProcessPrediksiAparatur,
 } = require("../controllers/aparaturController");
 const { verifyToken, authorizeRoles } = require("../middlewares/authMiddleware");
 
@@ -43,6 +45,20 @@ router.get(
   verifyToken,
   authorizeRoles("APARATUR", "ADMIN"),
   getLaporanAparatur
+);
+
+router.post(
+  "/klasifikasi-ulang/:id",
+  verifyToken,
+  authorizeRoles("APARATUR", "ADMIN"),
+  reclassifySkriningAparatur
+);
+
+router.post(
+  "/proses-prediksi",
+  verifyToken,
+  authorizeRoles("APARATUR", "ADMIN"),
+  batchProcessPrediksiAparatur
 );
 
 module.exports = router;

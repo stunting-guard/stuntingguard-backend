@@ -1,5 +1,6 @@
 const axios = require("axios");
 const prisma = require("../config/prisma");
+const { predictRandomForest } = require("../services/mlService");
 
 const AMBANG_KRITIS = 70;
 
@@ -647,30 +648,14 @@ function calculateDeterministicPrediction(fiturModel, antropometri = {}, dusun =
 }
 
 /**
- * Memanggil API machine learning eksternal (Python Random Forest)
- * hanya dengan 8 fitur model tervalidasi, atau fallback deterministik jika offline.
+ * Memanggil mesin machine learning scikit-learn Random Forest
+ * dengan 8 fitur model tervalidasi jurnal acuan, atau fallback deterministik jika gagal.
  */
 async function callMlOrFallback(fiturModel, antropometri = {}, dusun = {}) {
-  const mlUrl = process.env.ML_API_URL || "http://localhost:8000/predict";
   const fallback = calculateDeterministicPrediction(fiturModel, antropometri, dusun);
 
   try {
-    const response = await axios.post(
-      mlUrl,
-      {
-        pendapatan: fiturModel.pendapatan,
-        statusSosialEkonomi: fiturModel.statusSosialEkonomi,
-        pendidikan: fiturModel.pendidikan || fiturModel.pendidikanIbu,
-        sanitasi: fiturModel.sanitasi || fiturModel.kondisiSanitasi,
-        air: fiturModel.air || fiturModel.sumberAir,
-        usiaIbu: fiturModel.usiaIbu,
-        asiEksklusif: fiturModel.asiEksklusif,
-        praktikMpasi: fiturModel.praktikMpasi,
-      },
-      { timeout: 2500 }
-    );
-
-    const mlData = response?.data?.data || response?.data;
+    const mlData = await predictRandomForest(fiturModel);
     if (!mlData || typeof mlData !== "object") {
       return { ...fallback, mlSource: "FALLBACK_DETERMINISTIC" };
     }
@@ -695,13 +680,8 @@ async function callMlOrFallback(fiturModel, antropometri = {}, dusun = {}) {
         ? mlData.faktorDetail || mlData.faktor
         : fallback.faktorDetail,
       faktorDominan: mlData.faktorDominan || fallback.faktorDominan,
-      rekomendasiDetail:
-        mlData.rekomendasiDetail ||
-        mlData.rekomendasi ||
-        fallback.rekomendasiDetail,
-      rencanaIntervensi:
-        mlData.rencanaIntervensi || fallback.rencanaIntervensi,
-      mlSource: "PYTHON_RANDOM_FOREST",
+      prioritas: mlData.prioritas || fallback.prioritas,
+      mlSource: "SCIKIT_LEARN_RANDOM_FOREST",
     };
   } catch (err) {
     return { ...fallback, mlSource: "FALLBACK_DETERMINISTIC" };
@@ -1052,11 +1032,30 @@ async function createPrediksi(req, res, next) {
       });
     }
 
-    const dusun = await resolveTargetDusun({
-      dusunId: body.dusunId,
-      wilayah: body.wilayah,
-      userId: req.user?.id,
-    });
+    let dusun;
+    if (req.user?.role === "KADER") {
+      if (!req.user.dusunId) {
+        return res.status(400).json({
+          success: false,
+          message: "Akun Kader Anda belum ditugaskan ke wilayah dusun manapun. Hubungi administrator desa.",
+        });
+      }
+      dusun = await prisma.dusun.findUnique({
+        where: { id: req.user.dusunId },
+      });
+      if (!dusun) {
+        return res.status(400).json({
+          success: false,
+          message: "Wilayah dusun penugasan Kader tidak ditemukan di sistem.",
+        });
+      }
+    } else {
+      dusun = await resolveTargetDusun({
+        dusunId: body.dusunId,
+        wilayah: body.wilayah,
+        userId: req.user?.id,
+      });
+    }
 
     if (!dusun) {
       return res.status(400).json({
@@ -1174,6 +1173,16 @@ async function getPrediksiById(req, res, next) {
       });
     }
 
+    // Pembatasan akses berbasis wilayah untuk role KADER
+    if (req.user?.role === "KADER") {
+      if (!req.user.dusunId || record.dusunId !== req.user.dusunId) {
+        return res.status(403).json({
+          success: false,
+          message: "Akses ditolak: Anda tidak memiliki izin untuk melihat data skrining di luar wilayah dusun tugas Anda.",
+        });
+      }
+    }
+
     return res.status(200).json({
       success: true,
       message: "Hasil prediksi berhasil diambil",
@@ -1199,6 +1208,31 @@ async function getRiwayat(req, res, next) {
 
     const where = {};
 
+    // Pembatasan akses berbasis wilayah untuk role KADER
+    if (req.user?.role === "KADER") {
+      if (!req.user.dusunId) {
+        return res.status(200).json({
+          success: true,
+          message: "Riwayat prediksi berhasil diambil (Kader belum ditugaskan ke dusun)",
+          data: {
+            items: [],
+            meta: {
+              page: 1,
+              limit: pageSize,
+              total: 0,
+              totalPages: 1,
+            },
+          },
+        });
+      }
+      where.dusunId = req.user.dusunId;
+    } else {
+      const trimmedRw = String(rw).trim();
+      if (trimmedRw && !trimmedRw.toLowerCase().includes("semua")) {
+        where.dusun = { rw: trimmedRw };
+      }
+    }
+
     const trimmedSearch = String(search).trim();
     if (trimmedSearch) {
       where.OR = [
@@ -1208,11 +1242,6 @@ async function getRiwayat(req, res, next) {
         { noKk: { contains: trimmedSearch } },
         { namaIbu: { contains: trimmedSearch } },
       ];
-    }
-
-    const trimmedRw = String(rw).trim();
-    if (trimmedRw && !trimmedRw.toLowerCase().includes("semua")) {
-      where.dusun = { rw: trimmedRw };
     }
 
     const trimmedRisiko = String(risiko).trim().toUpperCase();
@@ -1288,4 +1317,5 @@ module.exports = {
   createPrediksi,
   getPrediksiById,
   getRiwayat,
+  callMlOrFallback,
 };

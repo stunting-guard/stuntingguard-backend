@@ -589,6 +589,40 @@ Response 200 (key mengikuti `MOCK_RINGKASAN`, `MOCK_WILAYAH`, `MOCK_BALITA_PRIOR
 
 `tone` dapat diturunkan dari `tag`/`risiko`; `aksen` murni UI.
 
+### 4.6 Klasifikasi Ulang Skrining — `HasilPrediksi.jsx`
+
+| Method | Endpoint | Role |
+| --- | --- | --- |
+| POST | `/api/aparatur/klasifikasi-ulang/:id` | APARATUR, ADMIN |
+
+Memproses ulang prediksi stunting untuk satu entri skrining dengan model scikit-learn Random Forest terkini.
+
+Response 200:
+```json
+{
+  "success": true,
+  "message": "Data skrining KK-SKM-0042 berhasil diklasifikasi ulang dengan Random Forest",
+  "data": { "id": 42, "statusRisiko": "TINGGI", "keyakinanModel": 89, "probabilitas": [...] }
+}
+```
+
+### 4.7 Proses Prediksi / Klasifikasi Ulang Massal
+
+| Method | Endpoint | Role |
+| --- | --- | --- |
+| POST | `/api/aparatur/proses-prediksi` | APARATUR, ADMIN |
+
+Request body (opsional): `{ "dusunId": 1 }`
+
+Response 200:
+```json
+{
+  "success": true,
+  "message": "Berhasil memproses ulang 12 data skrining dengan model Random Forest",
+  "data": { "totalDiproses": 12 }
+}
+```
+
 ---
 
 ## 5. Admin
