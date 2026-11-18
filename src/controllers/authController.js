@@ -19,14 +19,13 @@ const DUSUN_SELECT = {
 };
 
 function toPublicUser(user) {
-  const isActive = user.isActive !== false && user.status !== "NONAKTIF";
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     role: user.role,
-    isActive,
-    status: isActive ? "Aktif" : "Nonaktif",
+    isActive: true,
+    status: "Aktif",
     dusun: user.dusun
       ? {
           id: user.dusun.id,
@@ -61,8 +60,6 @@ async function login(req, res) {
       email: true,
       password: true,
       role: true,
-      isActive: true,
-      status: true,
       dusun: { select: DUSUN_SELECT },
     },
   });
@@ -71,13 +68,6 @@ async function login(req, res) {
     return res.status(401).json({
       success: false,
       message: "Email atau password salah. Periksa kembali lalu coba lagi.",
-    });
-  }
-
-  if (user.isActive === false || user.status === "NONAKTIF") {
-    return res.status(403).json({
-      success: false,
-      message: "Akun Anda telah dinonaktifkan oleh Administrator. Silakan hubungi pihak admin desa.",
     });
   }
 
@@ -122,8 +112,6 @@ async function getMe(req, res) {
       name: true,
       email: true,
       role: true,
-      isActive: true,
-      status: true,
       dusun: { select: DUSUN_SELECT },
     },
   });
@@ -132,13 +120,6 @@ async function getMe(req, res) {
     return res.status(401).json({
       success: false,
       message: "Sesi tidak valid: user tidak ditemukan",
-    });
-  }
-
-  if (user.isActive === false || user.status === "NONAKTIF") {
-    return res.status(403).json({
-      success: false,
-      message: "Akun Anda telah dinonaktifkan oleh Administrator. Hubungi pihak admin desa.",
     });
   }
 

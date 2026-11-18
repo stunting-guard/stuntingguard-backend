@@ -22,6 +22,18 @@ const RISK_ORDER = {
   RENDAH: 3,
 };
 
+function normalizeRiskFilter(...candidates) {
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null) continue;
+
+    const normalized = String(candidate).trim().toUpperCase();
+    if (!normalized || normalized === "SEMUA") continue;
+    if (RISK_ORDER[normalized]) return normalized;
+  }
+
+  return null;
+}
+
 function toTitleCaseRisk(statusRisiko) {
   if (statusRisiko === "TINGGI") return "Tinggi";
   if (statusRisiko === "SEDANG") return "Sedang";
@@ -173,6 +185,12 @@ async function getDashboard(req, res, next) {
 
     const currentPage = Math.max(1, parseInt(page, 10) || 1);
     const pageSize = Math.max(1, parseInt(limit, 10) || 5);
+    const riskFilter = normalizeRiskFilter(
+      req.query.risiko,
+      req.query.statusRisiko,
+      req.query.risk,
+      req.query.status
+    );
 
     const dusunFilter = {};
 
@@ -266,6 +284,7 @@ async function getDashboard(req, res, next) {
       where: {
         ...baseWhere,
         ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        ...(riskFilter ? { statusRisiko: riskFilter } : {}),
       },
       include: { dusun: true },
       orderBy: { createdAt: "desc" },

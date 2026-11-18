@@ -876,7 +876,7 @@ async function resolveTargetDusun({ dusunId, wilayah, userId }) {
   if (userId) {
     const userWithDusun = await prisma.user.findUnique({
       where: { id: Number(userId) },
-      include: { dusun: true },
+      select: { id: true, dusun: true },
     });
     if (userWithDusun?.dusun) return userWithDusun.dusun;
   }

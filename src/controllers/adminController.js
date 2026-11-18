@@ -189,8 +189,8 @@ function formatUserForResponse(user) {
     : "Kantor Desa Sukamaju (Sie Kesra)";
 
   const username = user.email.split("@")[0].replace(/[^a-zA-Z0-9_]/g, "_");
-  const isActive = user.isActive !== false && user.status !== "NONAKTIF";
-  const statusLabel = isActive ? "Aktif" : "Nonaktif";
+  const isActive = true;
+  const statusLabel = "Aktif";
 
   return {
     id: user.id,
@@ -234,9 +234,7 @@ async function getDashboardAdmin(req, res, next) {
     ] = await Promise.all([
       prisma.skriningStunting.count(),
       prisma.user.count(),
-      prisma.user.count({
-        where: { isActive: true, status: { not: "NONAKTIF" } },
-      }),
+      prisma.user.count(),
       prisma.user.groupBy({
         by: ["role"],
         _count: { role: true },
@@ -352,11 +350,9 @@ async function getUsers(req, res, next) {
     }
 
     const statusParam = status.trim().toLowerCase();
-    if (statusParam === "aktif") {
-      where.isActive = true;
-      where.status = { not: "NONAKTIF" };
-    } else if (statusParam === "nonaktif") {
-      where.OR = [{ isActive: false }, { status: "NONAKTIF" }];
+    if (statusParam === "nonaktif") {
+      // Model User tidak memiliki kolom status akun; tidak ada akun nonaktif.
+      where.id = -1;
     }
 
     const searchQuery = search.trim();
@@ -388,53 +384,44 @@ async function getUsers(req, res, next) {
       orderBy = { id: direction };
     }
 
-    const [total, users, totalUsers, activeUsers, inactiveUsers, usersByRole] =
-      await Promise.all([
-        prisma.user.count({ where }),
-        prisma.user.findMany({
-          where,
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-            isActive: true,
-            status: true,
-            dusunId: true,
-            dusun: {
-              select: {
-                id: true,
-                nama: true,
-                namaSingkat: true,
-                rw: true,
-              },
+    const [total, users, totalUsers, usersByRole] = await Promise.all([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          dusunId: true,
+          dusun: {
+            select: {
+              id: true,
+              nama: true,
+              namaSingkat: true,
+              rw: true,
             },
-            createdAt: true,
-            updatedAt: true,
           },
-          orderBy,
-          skip: (currentPage - 1) * pageSize,
-          take: pageSize,
-        }),
-        prisma.user.count(),
-        prisma.user.count({
-          where: { isActive: true, status: { not: "NONAKTIF" } },
-        }),
-        prisma.user.count({
-          where: { OR: [{ isActive: false }, { status: "NONAKTIF" }] },
-        }),
-        prisma.user.groupBy({
-          by: ["role"],
-          _count: { role: true },
-        }),
-      ]);
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy,
+        skip: (currentPage - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.user.count(),
+      prisma.user.groupBy({
+        by: ["role"],
+        _count: { role: true },
+      }),
+    ]);
 
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const items = users.map(formatUserForResponse);
     const summary = {
       total: totalUsers,
-      aktif: activeUsers,
-      nonaktif: inactiveUsers,
+      aktif: totalUsers,
+      nonaktif: 0,
       peran: { Kader: 0, Aparatur: 0, Admin: 0 },
     };
     usersByRole.forEach((group) => {
@@ -471,8 +458,6 @@ async function createUser(req, res, next) {
       role,
       peran,
       dusunId,
-      isActive,
-      status,
     } = req.body || {};
 
     const userName = (name || nama || "").trim();
@@ -498,6 +483,7 @@ async function createUser(req, res, next) {
 
     const existingUser = await prisma.user.findUnique({
       where: { email: userEmail },
+      select: { id: true },
     });
     if (existingUser) {
       return res.status(400).json({
@@ -516,22 +502,12 @@ async function createUser(req, res, next) {
     const validDusunId =
       dusunId && !Number.isNaN(Number(dusunId)) ? Number(dusunId) : null;
 
-    const userIsActive =
-      isActive !== undefined
-        ? Boolean(isActive)
-        : status
-        ? String(status).trim().toUpperCase() !== "NONAKTIF"
-        : true;
-    const userStatus = userIsActive ? "AKTIF" : "NONAKTIF";
-
     const created = await prisma.user.create({
       data: {
         name: userName,
         email: userEmail,
         password: hashedPassword,
         role: userRole,
-        isActive: userIsActive,
-        status: userStatus,
         dusunId: userRole === "KADER" ? validDusunId : null,
       },
       include: {
@@ -572,6 +548,13 @@ async function updateUser(req, res, next) {
 
     const existingUser = await prisma.user.findUnique({
       where: { id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        dusunId: true,
+      },
     });
     if (!existingUser) {
       return res.status(404).json({
@@ -587,8 +570,6 @@ async function updateUser(req, res, next) {
       role,
       peran,
       dusunId,
-      isActive,
-      status,
     } = req.body || {};
 
     const dataToUpdate = {};
@@ -601,6 +582,7 @@ async function updateUser(req, res, next) {
       if (normalizedEmail !== existingUser.email) {
         const emailTaken = await prisma.user.findUnique({
           where: { email: normalizedEmail },
+          select: { id: true },
         });
         if (emailTaken) {
           return res.status(400).json({
@@ -623,23 +605,6 @@ async function updateUser(req, res, next) {
     if (dusunId !== undefined) {
       dataToUpdate.dusunId =
         dusunId && !Number.isNaN(Number(dusunId)) ? Number(dusunId) : null;
-    }
-
-    if (isActive !== undefined || status !== undefined) {
-      const newIsActive =
-        isActive !== undefined
-          ? Boolean(isActive)
-          : String(status).trim().toUpperCase() !== "NONAKTIF";
-
-      if (!newIsActive && req.user && req.user.id === id) {
-        return res.status(400).json({
-          success: false,
-          message: "Tidak dapat menonaktifkan akun Anda sendiri yang sedang aktif.",
-        });
-      }
-
-      dataToUpdate.isActive = newIsActive;
-      dataToUpdate.status = newIsActive ? "AKTIF" : "NONAKTIF";
     }
 
     const updated = await prisma.user.update({
@@ -680,38 +645,14 @@ async function updateUserStatus(req, res, next) {
 
     const existingUser = await prisma.user.findUnique({
       where: { id },
-    });
-    if (!existingUser) {
-      return res.status(404).json({
-        success: false,
-        message: "Pengguna tidak ditemukan",
-      });
-    }
-
-    let targetIsActive;
-    if (req.body?.isActive !== undefined) {
-      targetIsActive = Boolean(req.body.isActive);
-    } else if (req.body?.status !== undefined) {
-      targetIsActive = String(req.body.status).trim().toUpperCase() !== "NONAKTIF";
-    } else {
-      const currentActive = existingUser.isActive && existingUser.status !== "NONAKTIF";
-      targetIsActive = !currentActive;
-    }
-
-    if (!targetIsActive && req.user && req.user.id === id) {
-      return res.status(400).json({
-        success: false,
-        message: "Tidak dapat menonaktifkan akun Anda sendiri yang sedang aktif.",
-      });
-    }
-
-    const updated = await prisma.user.update({
-      where: { id },
-      data: {
-        isActive: targetIsActive,
-        status: targetIsActive ? "AKTIF" : "NONAKTIF",
-      },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        dusunId: true,
+        createdAt: true,
+        updatedAt: true,
         dusun: {
           select: {
             id: true,
@@ -722,13 +663,18 @@ async function updateUserStatus(req, res, next) {
         },
       },
     });
-
-    const statusText = targetIsActive ? "diaktifkan" : "dinonaktifkan";
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        message: "Pengguna tidak ditemukan",
+      });
+    }
 
     return res.status(200).json({
       success: true,
-      message: `Akun pengguna ${updated.name} berhasil ${statusText}`,
-      data: formatUserForResponse(updated),
+      message:
+        "Status akun tidak dapat diubah karena model User belum memiliki kolom status. Seluruh akun diperlakukan aktif.",
+      data: formatUserForResponse(existingUser),
     });
   } catch (err) {
     return next(err);
@@ -748,6 +694,10 @@ async function resetPasswordUser(req, res, next) {
 
     const user = await prisma.user.findUnique({
       where: { id },
+      select: {
+        id: true,
+        email: true,
+      },
     });
     if (!user) {
       return res.status(404).json({
@@ -804,6 +754,7 @@ async function deleteUser(req, res, next) {
 
     const user = await prisma.user.findUnique({
       where: { id },
+      select: { id: true },
     });
     if (!user) {
       return res.status(404).json({
@@ -1410,8 +1361,6 @@ async function getDusunList(req, res, next) {
             name: true,
             email: true,
             role: true,
-            isActive: true,
-            status: true,
           },
         },
         _count: {
@@ -1437,8 +1386,8 @@ async function getDusunList(req, res, next) {
         name: u.name,
         email: u.email,
         role: u.role,
-        isActive: u.isActive !== false && u.status !== "NONAKTIF",
-        status: u.isActive !== false && u.status !== "NONAKTIF" ? "Aktif" : "Nonaktif",
+        isActive: true,
+        status: "Aktif",
       })),
       createdAt: d.createdAt,
       updatedAt: d.updatedAt,
@@ -1550,8 +1499,6 @@ async function createDusun(req, res, next) {
             name: true,
             email: true,
             role: true,
-            isActive: true,
-            status: true,
           },
         },
         _count: { select: { skrining: true } },
@@ -1576,7 +1523,7 @@ async function createDusun(req, res, next) {
           nama: u.name,
           email: u.email,
           role: u.role,
-          isActive: u.isActive !== false && u.status !== "NONAKTIF",
+          isActive: true,
         })),
       },
     });
@@ -1698,8 +1645,6 @@ async function updateDusun(req, res, next) {
             name: true,
             email: true,
             role: true,
-            isActive: true,
-            status: true,
           },
         },
         _count: { select: { skrining: true } },
@@ -1724,7 +1669,7 @@ async function updateDusun(req, res, next) {
           nama: u.name,
           email: u.email,
           role: u.role,
-          isActive: u.isActive !== false && u.status !== "NONAKTIF",
+          isActive: true,
         })),
       },
     });

@@ -19,7 +19,7 @@ async function verifyToken(req, res, next) {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Periksa status pengguna di database
+    // Ambil data pengguna dari database untuk melengkapi req.user
     const dbUser = await prisma.user.findUnique({
       where: { id: decoded.id },
       select: {
@@ -27,8 +27,6 @@ async function verifyToken(req, res, next) {
         name: true,
         email: true,
         role: true,
-        isActive: true,
-        status: true,
         dusunId: true,
       },
     });
@@ -37,13 +35,6 @@ async function verifyToken(req, res, next) {
       return res.status(401).json({
         success: false,
         message: "Akun pengguna tidak ditemukan atau telah dihapus.",
-      });
-    }
-
-    if (dbUser.isActive === false || dbUser.status === "NONAKTIF") {
-      return res.status(403).json({
-        success: false,
-        message: "Akun Anda telah dinonaktifkan oleh Administrator. Hubungi pihak admin desa.",
       });
     }
 
