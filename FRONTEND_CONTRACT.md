@@ -457,6 +457,8 @@ Response 200 (key mengikuti `MOCK_DUSUN` & `MOCK_FAKTOR`):
 
 `zona` menerima `Semua`, `Merah`, `Kuning`, atau `Hijau`. Zona spesifik hanya mengembalikan dusun yang memiliki skrining pada zona tersebut dan skrining yang cocok: Merah/TINGGI, Kuning/SEDANG, Hijau/RENDAH. Total/rendah/sedang/tinggi serta faktor dihitung dari skrining yang sama; faktor bernilai 0 bila tidak ada data cocok. Ringkasan kartu dihitung frontend dari `dusun[]`. Tombol **Cetak** = `window.print()` (client-side); **Unduh Laporan** = §6 dan mengirim zona aktif.
 
+`data.keluarga` berisi detail setiap skrining yang lolos filter (terbaru lebih dulu): `id`, `kodeKeluarga`, `noKk`, `kepalaKeluarga`, `namaIbu`, `namaBalita`, `nikBalita`, `usiaBulan`, `dusun` (nama dusun), `rt`, `statusRisiko`, `faktorDominan`, `createdAt`.
+
 ### 4.3 Peta Wilayah — `PetaWilayah.jsx`
 
 | Method | Endpoint | Role |
@@ -620,6 +622,35 @@ Response 200:
   "success": true,
   "message": "Berhasil memproses ulang 12 data skrining dengan model Random Forest",
   "data": { "totalDiproses": 12 }
+}
+```
+
+### 4.8 Reclassify Hasil Prediksi — `HasilPrediksi.jsx`
+
+| Method | Endpoint | Role |
+| --- | --- | --- |
+| POST | `/api/aparatur/hasil-prediksi/:id/reclassify` | APARATUR, ADMIN |
+
+Mengambil satu record `SkriningStunting` berdasarkan `id`, menjalankan ulang `callMlOrFallback` (ML API `ML_API_URL` atau fallback deterministik), lalu memperbarui `statusRisiko`, `keyakinanModel`, `probabilitas`, `faktorDetail`, `faktorDominan`, `rekomendasiDetail`, dan `rencanaIntervensi` di database.
+
+Response 200:
+```json
+{
+  "success": true,
+  "message": "Hasil prediksi KK-SKM-0042 berhasil diklasifikasi ulang",
+  "data": {
+    "id": 42,
+    "kodeKeluarga": "KK-SKM-0042",
+    "statusRisiko": "TINGGI",
+    "keyakinanModel": 89,
+    "probabilitas": [],
+    "faktorDetail": [],
+    "faktorDominan": "Sanitasi Buruk",
+    "rekomendasiDetail": {},
+    "rencanaIntervensi": "Rujukan Puskesmas + PMT Pemulihan Hewani (90 Hari) + Intervensi Sanitasi",
+    "dusun": {},
+    "updatedAt": "2026-11-19T00:00:00.000Z"
+  }
 }
 ```
 

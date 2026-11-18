@@ -1,4 +1,5 @@
 const express = require("express");
+const multer = require("multer");
 const {
   getDashboardAdmin,
   getUsers,
@@ -20,6 +21,11 @@ const {
 const { verifyToken, authorizeRoles } = require("../middlewares/authMiddleware");
 
 const router = express.Router();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
 
 // Seluruh route di bawah /api/admin diproteksi hanya untuk role ADMIN
 router.use(verifyToken, authorizeRoles("ADMIN"));
@@ -43,7 +49,7 @@ router.delete("/dusun/:id", deleteDusun);
 
 // 4. Kelola Dataset Skrining
 router.get("/dataset", getDataset);
-router.post("/dataset/import", importDataset);
+router.post("/dataset/import", upload.any(), importDataset);
 router.delete("/dataset/:id", deleteDataset);
 
 // 5. Evaluasi & Retrain Model ML

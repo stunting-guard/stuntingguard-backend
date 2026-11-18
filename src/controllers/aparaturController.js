@@ -54,8 +54,8 @@ async function getDashboardAparatur(req, res, next) {
       const kasusTinggi = d.skrining.filter(
         (s) => s.statusRisiko === "TINGGI"
       ).length;
-      const kapasitas = d.kapasitasBalita || 100;
-      totalBalita += kapasitas;
+      const jumlahBalita = d.skrining.length;
+      totalBalita += jumlahBalita;
       totalKasus += kasusTinggi;
 
       if (d.zona === "HIJAU") {
@@ -68,7 +68,7 @@ async function getDashboardAparatur(req, res, next) {
         namaSingkat: d.namaSingkat || d.nama.replace(/^Dusun\s+/i, ""),
         zona: toTitleCaseZona(d.zona),
         kasus: kasusTinggi,
-        balita: kapasitas,
+        balita: jumlahBalita,
         prioritas: d.prioritas || (d.zona === "MERAH" ? "PMT Ekstra" : "Pemantauan Rutin"),
       };
     });
@@ -145,7 +145,9 @@ async function getDataKeluargaAparatur(req, res, next) {
             (k.namaIbu && k.namaIbu.toLowerCase().includes(searchTerm))
         );
       }
-      filteredSkrining.push(...skrining);
+      filteredSkrining.push(
+        ...skrining.map((row) => ({ ...row, dusunNama: d.nama }))
+      );
 
       const tinggi = skrining.filter((s) => s.statusRisiko === "TINGGI").length;
       const sedang = skrining.filter((s) => s.statusRisiko === "SEDANG").length;
@@ -164,6 +166,25 @@ async function getDataKeluargaAparatur(req, res, next) {
     const filteredDusunRecap = zonaFilter.statusRisiko
       ? dusunRecap.filter((dusun) => dusun.total > 0)
       : dusunRecap;
+
+    const keluarga = [...filteredSkrining]
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .map((row) => ({
+        id: row.id,
+        kodeKeluarga:
+          row.kodeKeluarga || `KK-SKM-${String(row.id).padStart(4, "0")}`,
+        noKk: row.noKk || null,
+        kepalaKeluarga: row.kepalaKeluarga || null,
+        namaIbu: row.namaIbu || null,
+        namaBalita: row.namaBalita || null,
+        nikBalita: row.nikBalita || null,
+        usiaBulan: row.usiaBulan,
+        dusun: row.dusunNama,
+        rt: row.rt || null,
+        statusRisiko: row.statusRisiko,
+        faktorDominan: row.faktorDominan || null,
+        createdAt: row.createdAt,
+      }));
 
     // Hitung persentase faktor determinan desa
     let totalScore = 0;
@@ -234,6 +255,7 @@ async function getDataKeluargaAparatur(req, res, next) {
       data: {
         dusun: filteredDusunRecap,
         faktor,
+        keluarga,
       },
     });
   } catch (err) {
@@ -473,7 +495,6 @@ async function getLaporanAparatur(req, res, next) {
       where: { statusRisiko: "TINGGI" },
       include: { dusun: true },
       orderBy: { createdAt: "desc" },
-      take: 10,
     });
 
     const balitaPrioritas = highRiskSkrining.map((item) => ({
@@ -639,6 +660,89 @@ async function batchProcessPrediksiAparatur(req, res, next) {
   }
 }
 
+// 8. Klasifikasi Ulang Hasil Prediksi (POST /api/aparatur/hasil-prediksi/:id/reclassify)
+async function reclassifyHasilPrediksiAparatur(req, res, next) {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "ID hasil prediksi tidak valid",
+      });
+    }
+
+    const record = await prisma.skriningStunting.findUnique({
+      where: { id },
+      include: { dusun: true },
+    });
+
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        message: "Data hasil prediksi tidak ditemukan",
+      });
+    }
+
+    const fiturModel = {
+      pendapatan: record.pendapatan,
+      statusSosialEkonomi: record.statusSosialEkonomi,
+      pendidikan: record.pendidikanIbu,
+      pendidikanIbu: record.pendidikanIbu,
+      sanitasi: record.kondisiSanitasi,
+      kondisiSanitasi: record.kondisiSanitasi,
+      air: record.sumberAir,
+      sumberAir: record.sumberAir,
+      usiaIbu: record.usiaIbu,
+      asiEksklusif: record.asiEksklusif,
+      praktikMpasi: record.praktikMpasi,
+    };
+
+    const antropometri = {
+      usiaBulan: record.usiaBulan,
+      tinggiBadan: record.tinggiBadan,
+      beratBadan: record.beratBadan,
+      tinggiBadanIbu: record.tinggiBadanIbu,
+      beratLahirGram: record.beratLahirGram,
+    };
+
+    const hasil = await callMlOrFallback(fiturModel, antropometri, record.dusun);
+
+    const updated = await prisma.skriningStunting.update({
+      where: { id },
+      data: {
+        statusRisiko: hasil.statusRisiko,
+        keyakinanModel: hasil.keyakinanModel,
+        probabilitas: hasil.probabilitas,
+        faktorDetail: hasil.faktorDetail,
+        faktorDominan: hasil.faktorDominan,
+        rekomendasiDetail: hasil.rekomendasiDetail,
+        rencanaIntervensi: hasil.rencanaIntervensi,
+      },
+      include: { dusun: true },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Hasil prediksi ${updated.kodeKeluarga || updated.id} berhasil diklasifikasi ulang`,
+      data: {
+        id: updated.id,
+        kodeKeluarga: updated.kodeKeluarga,
+        statusRisiko: updated.statusRisiko,
+        keyakinanModel: updated.keyakinanModel,
+        probabilitas: updated.probabilitas,
+        faktorDetail: updated.faktorDetail,
+        faktorDominan: updated.faktorDominan,
+        rekomendasiDetail: updated.rekomendasiDetail,
+        rencanaIntervensi: updated.rencanaIntervensi,
+        dusun: updated.dusun,
+        updatedAt: updated.updatedAt,
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   getDashboardAparatur,
   getDataKeluargaAparatur,
@@ -646,5 +750,6 @@ module.exports = {
   getHasilPrediksiDetailAparatur,
   getLaporanAparatur,
   reclassifySkriningAparatur,
+  reclassifyHasilPrediksiAparatur,
   batchProcessPrediksiAparatur,
 };

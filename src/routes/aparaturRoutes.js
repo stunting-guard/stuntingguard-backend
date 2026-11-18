@@ -4,6 +4,7 @@ const {
   getDataKeluargaAparatur,
   getPetaWilayahAparatur,
   getHasilPrediksiDetailAparatur,
+  reclassifyHasilPrediksiAparatur,
   getLaporanAparatur,
   reclassifySkriningAparatur,
   batchProcessPrediksiAparatur,
@@ -38,6 +39,13 @@ router.get(
   verifyToken,
   authorizeRoles("APARATUR", "ADMIN"),
   getHasilPrediksiDetailAparatur
+);
+
+router.post(
+  "/hasil-prediksi/:id/reclassify",
+  verifyToken,
+  authorizeRoles("APARATUR", "ADMIN"),
+  reclassifyHasilPrediksiAparatur
 );
 
 router.get(

@@ -1,7 +1,143 @@
 const bcrypt = require("bcryptjs");
 const axios = require("axios");
+const { Readable } = require("stream");
+const csv = require("csv-parser");
 const prisma = require("../config/prisma");
 const { trainRandomForest } = require("../services/mlService");
+
+const ML_API_TIMEOUT = Number(process.env.ML_API_TIMEOUT_MS) || 60000;
+
+function normalizeKey(key) {
+  return String(key || "")
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function normalizeRowKeys(row) {
+  const normalized = {};
+  Object.entries(row || {}).forEach(([key, value]) => {
+    normalized[normalizeKey(key)] = value;
+  });
+  return normalized;
+}
+
+function pickValue(row, aliases) {
+  for (const alias of aliases) {
+    const key = normalizeKey(alias);
+    const value = row[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function toNumberOrNull(value) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+  const numeric =
+    typeof value === "number"
+      ? value
+      : Number(String(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function parseCsvBuffer(buffer) {
+  return new Promise((resolve, reject) => {
+    const text = buffer.toString("utf-8");
+    const firstLine = text.split(/\r?\n/)[0] || "";
+    const commaCount = (firstLine.match(/,/g) || []).length;
+    const semicolonCount = (firstLine.match(/;/g) || []).length;
+    const separator = semicolonCount > commaCount ? ";" : ",";
+
+    const rows = [];
+    Readable.from(buffer)
+      .pipe(
+        csv({
+          separator,
+          mapHeaders: ({ header }) => header.replace(/^\uFEFF/, "").trim(),
+        })
+      )
+      .on("data", (row) => rows.push(row))
+      .on("error", (err) => reject(err))
+      .on("end", () => resolve(rows));
+  });
+}
+
+function getMlApiBaseUrl() {
+  const raw = process.env.ML_API_URL || "http://localhost:8000/predict";
+  const trimmed = String(raw).replace(/\/+$/, "");
+  return /\/predict$/i.test(trimmed)
+    ? trimmed.replace(/\/predict$/i, "")
+    : trimmed;
+}
+
+function normalizeMlTrainResult(payload, totalRecords) {
+  if (!payload || typeof payload !== "object") return null;
+
+  const akurasi = Number(payload.akurasi);
+  const presisi = Number(payload.presisi);
+  const recall = Number(payload.recall);
+  const f1Score = Number(payload.f1Score ?? payload.f1);
+  if (![akurasi, presisi, recall, f1Score].every(Number.isFinite)) {
+    return null;
+  }
+
+  const toFinite = (value, fallback) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+  };
+
+  return {
+    versiModel:
+      payload.versiModel ||
+      `Random Forest Classifier v${new Date().toISOString().slice(0, 10)}`,
+    algoritma: payload.algoritma || "RandomForestClassifier (scikit-learn)",
+    totalDataLatih: toFinite(payload.totalDataLatih, totalRecords),
+    totalUji: toFinite(
+      payload.totalUji,
+      Math.max(1, Math.round(totalRecords * 0.2))
+    ),
+    tpTotal: toFinite(payload.tpTotal, 0),
+    akurasi,
+    presisi,
+    recall,
+    f1Score,
+    errorRate: toFinite(payload.errorRate, Number((100 - akurasi).toFixed(2))),
+    matrix: payload.matrix || payload.confusionMatrix || [],
+    perKategori: payload.perKategori || [],
+    featureImportance: payload.featureImportance || [],
+    dataLatihRiilMySQL: toFinite(
+      payload.dataLatihRiilMySQL ?? payload.dataLatihRiil,
+      totalRecords
+    ),
+    dataLatihReferensi: toFinite(payload.dataLatihReferensi, 0),
+    sumber: "ML_API",
+  };
+}
+
+async function trainRandomForestWithService(records = []) {
+  try {
+    const baseUrl = getMlApiBaseUrl();
+    const response = await axios.post(
+      `${baseUrl}/train`,
+      { data: records, dataset: records },
+      { timeout: ML_API_TIMEOUT }
+    );
+    const payload = response?.data?.data || response?.data;
+    const normalized = normalizeMlTrainResult(payload, records.length);
+    if (normalized) return normalized;
+  } catch (err) {
+    // Layanan Python tidak tersedia; lanjut ke pelatihan lokal (child process).
+  }
+
+  const fallback = await trainRandomForest(records);
+  return { ...fallback, sumber: fallback.sumber || "PYTHON_CHILD_PROCESS" };
+}
 
 const ROLE_MAP = {
   kader: "KADER",
@@ -848,40 +984,59 @@ async function getDataset(req, res, next) {
 // POST /api/admin/dataset/import
 async function importDataset(req, res, next) {
   try {
+    const body = req.body || {};
+    const uploadedFile =
+      req.file || (Array.isArray(req.files) ? req.files[0] : null);
     let rows = [];
-    if (Array.isArray(req.body)) {
-      rows = req.body;
-    } else if (Array.isArray(req.body?.rows)) {
-      rows = req.body.rows;
-    } else if (Array.isArray(req.body?.data)) {
-      rows = req.body.data;
-    } else if (typeof req.body?.csv === "string") {
-      const lines = req.body.csv.trim().split(/\r?\n/);
-      if (lines.length > 1) {
-        const headers = lines[0].split(",").map((h) => h.trim());
-        for (let i = 1; i < lines.length; i += 1) {
-          const cols = lines[i].split(",").map((c) => c.trim());
-          const obj = {};
-          headers.forEach((h, idx) => {
-            obj[h] = cols[idx];
-          });
-          rows.push(obj);
-        }
+    let sourceFormat = "json";
+
+    if (uploadedFile && uploadedFile.buffer) {
+      const isCsv =
+        /\.(csv|txt)$/i.test(uploadedFile.originalname || "") ||
+        /csv|text\/plain/i.test(uploadedFile.mimetype || "");
+
+      if (!isCsv) {
+        return res.status(400).json({
+          success: false,
+          message: "Format file tidak didukung. Gunakan file .csv.",
+        });
       }
+
+      rows = await parseCsvBuffer(uploadedFile.buffer);
+      sourceFormat = "csv";
+    } else if (Array.isArray(body)) {
+      rows = body;
+    } else if (Array.isArray(body.rows)) {
+      rows = body.rows;
+    } else if (Array.isArray(body.data)) {
+      rows = body.data;
+    } else if (typeof body.csv === "string") {
+      rows = await parseCsvBuffer(Buffer.from(body.csv, "utf-8"));
+      sourceFormat = "csv";
     }
 
-    if (!rows || rows.length === 0) {
+    rows = (rows || []).filter(
+      (row) =>
+        row &&
+        typeof row === "object" &&
+        Object.values(row).some((value) => String(value ?? "").trim() !== "")
+    );
+
+    if (rows.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "Tidak ada baris data valid untuk diimpor. Kirim array baris data.",
+        message:
+          "Tidak ada baris data valid untuk diimpor. Unggah file .csv atau kirim array baris data.",
       });
     }
 
-    const firstDusun = await prisma.dusun.findFirst({ orderBy: { id: "asc" } });
+    const dusunList = await prisma.dusun.findMany({ orderBy: { id: "asc" } });
+    const firstDusun = dusunList[0];
     if (!firstDusun) {
       return res.status(400).json({
         success: false,
-        message: "Master data Dusun belum tersedia. Silakan jalankan seeder terlebih dahulu.",
+        message:
+          "Master data Dusun belum tersedia. Silakan jalankan seeder terlebih dahulu.",
       });
     }
 
@@ -889,98 +1044,293 @@ async function importDataset(req, res, next) {
     const errors = [];
 
     for (let i = 0; i < rows.length; i += 1) {
-      const row = rows[i];
+      const row = normalizeRowKeys(rows[i]);
       try {
-        const rawUsia = row.usia ?? row.usia_bulan ?? row.usiaBulan;
-        const usiaBulan = Math.max(0, Math.min(59, parseInt(rawUsia, 10) || 12));
+        const rawUsia = pickValue(row, [
+          "usia",
+          "usia_bulan",
+          "usiabulan",
+          "umur",
+          "umur_bulan",
+        ]);
+        let usiaBulan = toNumberOrNull(rawUsia);
+        if (
+          usiaBulan !== null &&
+          rawUsia !== undefined &&
+          /tahun/i.test(String(rawUsia))
+        ) {
+          usiaBulan *= 12;
+        }
+        usiaBulan =
+          usiaBulan === null
+            ? 12
+            : Math.max(0, Math.min(59, Math.round(usiaBulan)));
 
-        const tb =
-          row.tinggi ?? row.tinggi_badan ?? row.tinggiBadan
-            ? parseFloat(row.tinggi ?? row.tinggi_badan ?? row.tinggiBadan)
-            : 75.0;
-        const bb =
-          row.berat ?? row.berat_badan ?? row.beratBadan
-            ? parseFloat(row.berat ?? row.berat_badan ?? row.beratBadan)
-            : 8.5;
+        const tinggiBadan =
+          toNumberOrNull(
+            pickValue(row, [
+              "tinggi",
+              "tinggi_badan",
+              "tinggibadan",
+              "tb",
+              "panjang_badan",
+            ])
+          ) ?? 75.0;
+        const beratBadan =
+          toNumberOrNull(
+            pickValue(row, [
+              "berat",
+              "berat_badan",
+              "beratbadan",
+              "bb",
+              "berat_balita",
+            ])
+          ) ?? 8.5;
 
-        const kepala =
-          row.kepalaKeluarga ??
-          row.nama_kepala_keluarga ??
-          row.kepala ??
-          `Keluarga Balita #${i + 1}`;
-        const namaBalita =
-          row.namaBalita ??
-          row.nama_balita ??
-          row.balita ??
-          `Balita ${kepala.replace(/^Bpk\.\s*/i, "")}`;
+        const kepala = String(
+          pickValue(row, [
+            "kepalakeluarga",
+            "nama_kepala_keluarga",
+            "nama_kepalakeluarga",
+            "kepala",
+            "nama_kepala",
+          ]) ?? `Keluarga Balita #${i + 1}`
+        ).trim();
+
+        const namaBalita = String(
+          pickValue(row, [
+            "namabalita",
+            "nama_balita",
+            "balita",
+            "nama_anak",
+          ]) ?? `Balita ${kepala.replace(/^Bpk\.\s*/i, "")}`
+        ).trim();
 
         const rawJk = String(
-          row.jk ?? row.jenis_kelamin ?? row.jenisKelamin ?? "L"
+          pickValue(row, [
+            "jk",
+            "jenis_kelamin",
+            "jeniskelamin",
+            "jenis_kelamin_balita",
+          ]) ?? "L"
         ).toUpperCase();
         const jenisKelamin = rawJk.startsWith("P") ? "Perempuan" : "Laki-laki";
 
-        const kondisiSanitasi =
-          row.sanitasi ??
-          row.sanitasi_jamban ??
-          row.kondisiSanitasi ??
-          "Jamban Pribadi Layak";
-        const sumberAir =
-          row.air ?? row.sumber_air ?? row.sumberAir ?? "PDAM / Perpipaan";
+        const pendapatan =
+          toNumberOrNull(
+            pickValue(row, [
+              "pendapatan",
+              "penghasilan",
+              "pendapatan_keluarga",
+              "total_pendapatan",
+            ])
+          ) ?? 1800000;
+
+        const kondisiSanitasi = String(
+          pickValue(row, [
+            "kondisisianitasi",
+            "kondisi_sanitasi",
+            "sanitasi",
+            "sanitasi_jamban",
+            "jamban",
+            "kondisi_jamban",
+          ]) ?? "Jamban Pribadi Layak"
+        ).trim();
+
+        const sumberAir = String(
+          pickValue(row, [
+            "sumberair",
+            "sumber_air",
+            "air",
+            "sumber_air_minum",
+            "air_minum",
+          ]) ?? "PDAM / Perpipaan"
+        ).trim();
+
+        const rawRisk = String(
+          pickValue(row, [
+            "risiko",
+            "status_risiko",
+            "statusrisiko",
+            "status_risiko_stunting",
+            "status_stunting",
+          ]) ?? ""
+        ).toUpperCase();
 
         let statusRisiko = "RENDAH";
-        const rawRisk = String(
-          row.risiko ?? row.status_risiko ?? row.statusRisiko ?? ""
-        ).toUpperCase();
         if (rawRisk.includes("TINGGI")) statusRisiko = "TINGGI";
         else if (rawRisk.includes("SEDANG")) statusRisiko = "SEDANG";
         else if (rawRisk.includes("RENDAH")) statusRisiko = "RENDAH";
-        else {
-          if (
-            kondisiSanitasi.toLowerCase().includes("tidak") ||
-            sumberAir.toLowerCase().includes("sungai")
-          ) {
-            statusRisiko = "TINGGI";
-          }
+        else if (
+          kondisiSanitasi.toLowerCase().includes("tidak") ||
+          sumberAir.toLowerCase().includes("sungai")
+        ) {
+          statusRisiko = "TINGGI";
         }
 
-        const kodeKeluarga =
-          row.kodeKeluarga ??
-          row.id_balita ??
-          row.id ??
-          `KK-IMP-${Date.now().toString().slice(-4)}${i + 1}`;
+        const statusSosialEkonomi = String(
+          pickValue(row, [
+            "statussosialekonomi",
+            "status_sosial_ekonomi",
+            "statusekonomi",
+            "status_ekonomi",
+          ]) ??
+            (pendapatan < 1500000
+              ? "Prasejahtera / Penerima Bantuan (PKH/BPNT)"
+              : pendapatan < 3000000
+              ? "Rentan Miskin / Bawah UMR"
+              : "Menengah / Sejahtera")
+        ).trim();
+
+        const kodeKeluarga = String(
+          pickValue(row, [
+            "kodekeluarga",
+            "kode_keluarga",
+            "id_balita",
+            "idbalita",
+            "kode",
+            "id",
+          ]) ?? `KK-IMP-${Date.now().toString().slice(-4)}${i + 1}`
+        ).trim();
+
+        const dusunInput = pickValue(row, [
+          "dusun",
+          "nama_dusun",
+          "wilayah",
+          "rw",
+        ]);
+        const matchedDusun = dusunInput
+          ? dusunList.find(
+              (d) =>
+                d.nama.toLowerCase().includes(String(dusunInput).toLowerCase()) ||
+                (d.namaSingkat &&
+                  d.namaSingkat
+                    .toLowerCase()
+                    .includes(String(dusunInput).toLowerCase())) ||
+                d.rw.toLowerCase() === String(dusunInput).toLowerCase()
+            )
+          : null;
 
         await prisma.skriningStunting.create({
           data: {
             kodeKeluarga,
+            noKk:
+              pickValue(row, ["nokk", "no_kk", "nomor_kk"]) !== undefined
+                ? String(pickValue(row, ["nokk", "no_kk", "nomor_kk"])).trim()
+                : null,
             kepalaKeluarga: kepala,
+            namaIbu:
+              pickValue(row, ["namaibu", "nama_ibu", "ibu"]) !== undefined
+                ? String(
+                    pickValue(row, ["namaibu", "nama_ibu", "ibu"])
+                  ).trim()
+                : null,
             namaBalita,
+            nikBalita:
+              pickValue(row, [
+                "nikbalita",
+                "nik_balita",
+                "nik",
+              ]) !== undefined
+                ? String(
+                    pickValue(row, ["nikbalita", "nik_balita", "nik"])
+                  ).trim()
+                : null,
             jenisKelamin,
+            rt:
+              pickValue(row, ["rt", "rt_rw", "rukun_tetangga"]) !== undefined
+                ? String(
+                    pickValue(row, ["rt", "rt_rw", "rukun_tetangga"])
+                  ).trim()
+                : null,
             usiaBulan,
-            tinggiBadan: tb,
-            beratBadan: bb,
-            zScoreTb: statusRisiko === "TINGGI" ? -2.4 : statusRisiko === "SEDANG" ? -1.3 : 0.1,
-            zScoreBb: statusRisiko === "TINGGI" ? -1.8 : statusRisiko === "SEDANG" ? -1.0 : 0.2,
-            statusTb: statusRisiko === "TINGGI" ? "Di Bawah Standar (Pendek)" : "Normal",
+            tinggiBadan,
+            beratBadan,
+            zScoreTb:
+              statusRisiko === "TINGGI"
+                ? -2.4
+                : statusRisiko === "SEDANG"
+                ? -1.3
+                : 0.1,
+            zScoreBb:
+              statusRisiko === "TINGGI"
+                ? -1.8
+                : statusRisiko === "SEDANG"
+                ? -1.0
+                : 0.2,
+            statusTb:
+              statusRisiko === "TINGGI"
+                ? "Di Bawah Standar (Pendek)"
+                : "Normal",
             statusBb: statusRisiko === "TINGGI" ? "Kurang" : "Normal",
-            pendapatan: row.pendapatan ? parseInt(row.pendapatan, 10) : 1800000,
-            statusSosialEkonomi: row.statusSosialEkonomi || "Rentan Miskin / Bawah UMR",
-            pendidikanIbu: row.pendidikanIbu || row.pendidikan || "SMA (Sekolah Menengah Atas)",
-            usiaIbu: row.usiaIbu ? parseInt(row.usiaIbu, 10) : null,
-            riwayatKehamilan: row.riwayatKehamilan || row.kek || "Tidak Pernah KEK",
+            pendapatan: Math.round(pendapatan),
+            statusSosialEkonomi,
+            pendidikanIbu: String(
+              pickValue(row, [
+                "pendidikanibu",
+                "pendidikan_ibu",
+                "pendidikan",
+              ]) ?? "SMA (Sekolah Menengah Atas)"
+            ).trim(),
+            usiaIbu: (() => {
+              const value = toNumberOrNull(
+                pickValue(row, ["usiaibu", "usia_ibu", "umur_ibu"])
+              );
+              return value === null ? null : Math.round(value);
+            })(),
+            riwayatKehamilan: String(
+              pickValue(row, [
+                "riwayatkehamilan",
+                "riwayat_kehamilan",
+                "kek",
+                "riwayat_kek",
+              ]) ?? "Tidak Pernah KEK"
+            ).trim(),
             sumberAir,
             kondisiSanitasi,
-            asiEksklusif: row.asiEksklusif || "Ya (ASI Eksklusif 0–6 Bulan / Masih Berjalan)",
-            praktikMpasi: row.praktikMpasi || "Tepat Waktu & Gizi Seimbang (Protein Hewani)",
-            noKk: row.noKk || null,
-            namaIbu: row.namaIbu || null,
-            tinggiBadanIbu: row.tinggiBadanIbu ? parseFloat(row.tinggiBadanIbu) : null,
-            beratLahirGram: row.beratLahirGram ? parseInt(row.beratLahirGram, 10) : null,
+            asiEksklusif: String(
+              pickValue(row, [
+                "asieksklusif",
+                "asi_eksklusif",
+                "asi",
+              ]) ?? "Ya (ASI Eksklusif 0–6 Bulan / Masih Berjalan)"
+            ).trim(),
+            praktikMpasi: String(
+              pickValue(row, [
+                "praktikmpasi",
+                "praktik_mpasi",
+                "mpasi",
+              ]) ?? "Tepat Waktu & Gizi Seimbang (Protein Hewani)"
+            ).trim(),
+            tinggiBadanIbu: toNumberOrNull(
+              pickValue(row, [
+                "tinggibadanibu",
+                "tinggi_badan_ibu",
+                "tb_ibu",
+              ])
+            ),
+            beratLahirGram: (() => {
+              const value = toNumberOrNull(
+                pickValue(row, [
+                  "beratlahirgram",
+                  "berat_lahir_gram",
+                  "berat_lahir",
+                  "bblr",
+                ])
+              );
+              return value === null ? null : Math.round(value);
+            })(),
             statusRisiko,
             keyakinanModel: 91.5,
             ambangKritis: 70,
-            prioritas: statusRisiko === "TINGGI" ? "Prioritas 1" : "Aman",
+            prioritas:
+              statusRisiko === "TINGGI"
+                ? "Prioritas 1"
+                : statusRisiko === "SEDANG"
+                ? "Prioritas 2"
+                : "Aman",
             faktorDominan: "Sanitasi & Sumber Air",
-            dusunId: firstDusun.id,
+            dusunId: matchedDusun ? matchedDusun.id : firstDusun.id,
             kaderId: req.user?.id || null,
           },
         });
@@ -1000,6 +1350,7 @@ async function importDataset(req, res, next) {
         importedCount: insertedCount,
         failedCount: errors.length,
         totalData,
+        format: sourceFormat,
         errors: errors.slice(0, 5),
       },
     });
@@ -1440,14 +1791,9 @@ async function deleteDusun(req, res, next) {
 // GET /api/admin/ml/evaluasi
 async function getEvaluasiModel(req, res, next) {
   try {
-    const totalDataLatihRiil = await prisma.skriningStunting.count();
-
-    let latestEval = await prisma.modelEvaluation.findFirst({
-      orderBy: { createdAt: "desc" },
-    });
-
-    if (!latestEval) {
-      const skriningList = await prisma.skriningStunting.findMany({
+    const [totalDataLatihRiil, skriningList, existingEval] = await Promise.all([
+      prisma.skriningStunting.count(),
+      prisma.skriningStunting.findMany({
         select: {
           id: true,
           statusRisiko: true,
@@ -1460,9 +1806,18 @@ async function getEvaluasiModel(req, res, next) {
           usiaIbu: true,
           pendidikanIbu: true,
         },
-      });
+      }),
+      prisma.modelEvaluation.findFirst({
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
 
-      const trainResult = await trainRandomForest(skriningList);
+    let latestEval = existingEval;
+    const shouldRefresh =
+      !latestEval || String(req.query.refresh || "").toLowerCase() === "true";
+
+    if (shouldRefresh) {
+      const trainResult = await trainRandomForestWithService(skriningList);
 
       const metrics = [
         {
@@ -1527,6 +1882,12 @@ async function getEvaluasiModel(req, res, next) {
     }
 
     const kelas = ["Rendah", "Sedang", "Tinggi"];
+    const datasetRiil = {
+      total: totalDataLatihRiil,
+      tinggi: skriningList.filter((row) => row.statusRisiko === "TINGGI").length,
+      sedang: skriningList.filter((row) => row.statusRisiko === "SEDANG").length,
+      rendah: skriningList.filter((row) => row.statusRisiko === "RENDAH").length,
+    };
 
     return res.status(200).json({
       success: true,
@@ -1536,6 +1897,9 @@ async function getEvaluasiModel(req, res, next) {
         algoritma: latestEval.algoritma,
         totalDataLatih: latestEval.totalDataLatih,
         totalDataLatihRiil,
+        totalDatasetRiil: totalDataLatihRiil,
+        datasetRiil,
+        sumberData: "prisma.skriningStunting",
         totalUji: latestEval.totalUji,
         tpTotal: latestEval.tpTotal,
         errorRate: latestEval.errorRate,
@@ -1578,8 +1942,9 @@ async function retrainModel(req, res, next) {
       }),
     ]);
 
-    // 2. Jalankan pelatihan ulang Random Forest asli dengan scikit-learn
-    const trainResult = await trainRandomForest(skriningList);
+    // 2. Jalankan pelatihan ulang Random Forest melalui layanan Python ML
+    //    (ML_API_URL) dengan fallback ke pelatihan lokal scikit-learn.
+    const trainResult = await trainRandomForestWithService(skriningList);
 
     const metrics = [
       {
@@ -1655,8 +2020,13 @@ async function retrainModel(req, res, next) {
         recall: savedEval.recall,
         f1Score: savedEval.f1Score,
         totalDataLatih: savedEval.totalDataLatih,
+        totalDataLatihRiil,
+        totalDatasetRiil: totalDataLatihRiil,
         dataLatihRiil: trainResult.dataLatihRiilMySQL,
         dataLatihReferensi: trainResult.dataLatihReferensi,
+        sumberData: "prisma.skriningStunting",
+        sumberPelatihan: trainResult.sumber || "PYTHON_CHILD_PROCESS",
+        mlServiceUrl: getMlApiBaseUrl(),
         retrainedAt: savedEval.waktuTraining,
         waktuTraining: savedEval.waktuTraining,
         engine: "scikit-learn RandomForestClassifier",
