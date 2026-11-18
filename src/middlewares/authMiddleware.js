@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
+const prisma = require("../config/prisma");
 
-function verifyToken(req, res, next) {
+async function verifyToken(req, res, next) {
   const header = req.headers.authorization || "";
   const [scheme, token] = header.split(" ");
 
@@ -17,7 +18,36 @@ function verifyToken(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+
+    // Periksa status pengguna di database
+    const dbUser = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        status: true,
+        dusunId: true,
+      },
+    });
+
+    if (!dbUser) {
+      return res.status(401).json({
+        success: false,
+        message: "Akun pengguna tidak ditemukan atau telah dihapus.",
+      });
+    }
+
+    if (dbUser.isActive === false || dbUser.status === "NONAKTIF") {
+      return res.status(403).json({
+        success: false,
+        message: "Akun Anda telah dinonaktifkan oleh Administrator. Hubungi pihak admin desa.",
+      });
+    }
+
+    req.user = dbUser;
     return next();
   } catch (err) {
     return res.status(401).json({

@@ -7,7 +7,7 @@ const router = express.Router();
 router.get(
   "/form-options",
   verifyToken,
-  authorizeRoles("KADER", "ADMIN"),
+  authorizeRoles("KADER", "APARATUR", "ADMIN"),
   getFormOptions
 );
 
@@ -19,4 +19,3 @@ router.get(
 );
 
 module.exports = router;
-

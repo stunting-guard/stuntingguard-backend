@@ -9,7 +9,7 @@ const AMBANG_KRITIS = 70;
 const USERS = [
   {
     email: "posyandu@posyandu.go.id",
-    name: "Bidan Sri Wahyuni",
+    name: "Mamil Ganteng",
     role: "KADER",
     dusunNama: "Dusun Melati",
   },

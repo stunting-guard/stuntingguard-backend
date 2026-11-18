@@ -30,6 +30,8 @@ model User {
   email     String   @unique
   password  String
   role      Role     @default(KADER)
+  isActive  Boolean  @default(true)
+  status    String   @default("AKTIF")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -102,4 +104,27 @@ model SkriningStunting {
   dusun   Dusun @relation(fields: [dusunId], references: [id])
   kaderId Int?
   kader   User? @relation(fields: [kaderId], references: [id])
+}
+
+model ModelEvaluation {
+  id                Int      @id @default(autoincrement())
+  versiModel        String
+  algoritma         String
+  totalDataLatih    Int
+  totalUji          Int
+  tpTotal           Int
+  akurasi           Float
+  presisi           Float
+  recall            Float
+  f1Score           Float
+  errorRate         Float
+  metrics           Json
+  confusionMatrix   Json
+  perKategori       Json
+  featureImportance Json
+  waktuTraining     DateTime @default(now())
+  status            String   @default("COMPLETED")
+  catatan           String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }

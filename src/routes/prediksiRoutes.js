@@ -7,13 +7,18 @@ const { verifyToken, authorizeRoles } = require("../middlewares/authMiddleware")
 
 const router = express.Router();
 
-router.post("/", verifyToken, authorizeRoles("KADER", "ADMIN"), createPrediksi);
+router.post(
+  "/",
+  verifyToken,
+  authorizeRoles("KADER", "APARATUR", "ADMIN"),
+  createPrediksi
+);
+
 router.get(
   "/:id",
   verifyToken,
-  authorizeRoles("KADER", "ADMIN"),
+  authorizeRoles("KADER", "APARATUR", "ADMIN"),
   getPrediksiById
 );
 
 module.exports = router;
-
