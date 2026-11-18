@@ -31,6 +31,74 @@ function getToneFromZona(zona) {
   return "hijau";
 }
 
+function toNullableNumber(value) {
+  if (value === undefined || value === null || value === "") return null;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function buildAnthropometryData(record) {
+  return {
+    tinggiBadan: toNullableNumber(record.tinggiBadan),
+    beratBadan: toNullableNumber(record.beratBadan),
+    zScoreTb: toNullableNumber(record.zScoreTb),
+    zScoreBb: toNullableNumber(record.zScoreBb),
+    statusTb: record.statusTb || null,
+    statusBb: record.statusBb || null,
+  };
+}
+
+function buildBalitaLingkunganData(record) {
+  const nikBalita = record.nikBalita || null;
+  const namaBalita = record.namaBalita || null;
+  const jenisKelamin = record.jenisKelamin || null;
+  const usiaBulan = toNullableNumber(record.usiaBulan);
+  const kondisiSanitasi = record.kondisiSanitasi || null;
+  const sumberAir = record.sumberAir || null;
+  const statusSosialEkonomi = record.statusSosialEkonomi || null;
+  const dusunNama = record.dusun?.nama || null;
+  const rt = record.rt || null;
+  const antropometri = buildAnthropometryData(record);
+
+  return {
+    ...antropometri,
+    nikBalita,
+    namaBalita,
+    jenisKelamin,
+    usiaBulan,
+    kondisiSanitasi,
+    sanitasi: kondisiSanitasi,
+    sumberAir,
+    statusSosialEkonomi,
+    kategoriKeluarga: statusSosialEkonomi,
+    namaDusun: dusunNama,
+    rt,
+    balita: {
+      nama: namaBalita || "Ananda",
+      namaBalita,
+      nik: nikBalita || "-",
+      nikBalita,
+      jenisKelamin: jenisKelamin || "Laki-laki",
+      usiaBulan,
+    },
+    antropometri,
+    lingkungan: {
+      dusun: dusunNama,
+      namaDusun: dusunNama,
+      rt,
+      rtRw: `${rt || "RT 01"} / ${record.dusun?.rw || "RW 01"}`,
+      kepalaKeluarga: record.kepalaKeluarga || "-",
+      jamban: kondisiSanitasi || "Jamban Tidak Layak",
+      kondisiSanitasi,
+      sanitasi: kondisiSanitasi,
+      sumberAir: sumberAir || "Sumur Gali",
+      statusSosialEkonomi,
+      kategoriKeluarga: statusSosialEkonomi,
+    },
+  };
+}
+
 // 1. Dashboard Aparatur (GET /api/aparatur/dashboard)
 async function getDashboardAparatur(req, res, next) {
   try {
@@ -410,7 +478,12 @@ async function getHasilPrediksiDetailAparatur(req, res, next) {
       ? rekDetail.intervensi
       : defaultIntervensi;
 
-    const rtRw = `${record.rt || "RT 01"} / ${record.dusun?.rw || "RW 01"}`;
+    const common = buildBalitaLingkunganData(record);
+    const {
+      tinggiBadan: tinggiBadanNilai,
+      beratBadan: beratBadanNilai,
+      ...commonFields
+    } = common;
 
     return res.status(200).json({
       success: true,
@@ -423,28 +496,25 @@ async function getHasilPrediksiDetailAparatur(req, res, next) {
         prioritas: prioritasNumber,
         keyakinan: Math.round(record.keyakinanModel || 85),
         ambangKritis: Math.round(record.ambangKritis || 70),
-        balita: {
-          nama: record.namaBalita || "Ananda",
-          nik: record.nikBalita || "-",
-          jenisKelamin: record.jenisKelamin || "Laki-laki",
-          usiaBulan: record.usiaBulan,
-        },
+        ...commonFields,
+        tinggiBadanNilai,
+        beratBadanNilai,
+        dusun: common.namaDusun,
         tinggiBadan: {
-          nilai: record.tinggiBadan !== null ? Number(record.tinggiBadan) : 80.0,
-          zScore: record.zScoreTb !== null ? Number(record.zScoreTb) : -2.1,
-          status: record.statusTb || (record.statusRisiko === "TINGGI" ? "Di Bawah Standar (Pendek)" : "Normal"),
+          nilai: tinggiBadanNilai,
+          zScore: common.zScoreTb,
+          status: common.statusTb,
+          tinggiBadan: tinggiBadanNilai,
+          zScoreTb: common.zScoreTb,
+          statusTb: common.statusTb,
         },
         beratBadan: {
-          nilai: record.beratBadan !== null ? Number(record.beratBadan) : 9.5,
-          zScore: record.zScoreBb !== null ? Number(record.zScoreBb) : -1.5,
-          status: record.statusBb || (record.statusRisiko === "TINGGI" ? "Kurang" : "Normal"),
-        },
-        lingkungan: {
-          dusun: record.dusun?.nama || "Dusun Melati",
-          rtRw,
-          kepalaKeluarga: record.kepalaKeluarga || "-",
-          jamban: record.kondisiSanitasi || "Jamban Tidak Layak",
-          sumberAir: record.sumberAir || "Sumur Gali",
+          nilai: beratBadanNilai,
+          zScore: common.zScoreBb,
+          status: common.statusBb,
+          beratBadan: beratBadanNilai,
+          zScoreBb: common.zScoreBb,
+          statusBb: common.statusBb,
         },
         intervensi: intervensiList,
       },
@@ -721,6 +791,8 @@ async function reclassifyHasilPrediksiAparatur(req, res, next) {
       include: { dusun: true },
     });
 
+    const common = buildBalitaLingkunganData(updated);
+
     return res.status(200).json({
       success: true,
       message: `Hasil prediksi ${updated.kodeKeluarga || updated.id} berhasil diklasifikasi ulang`,
@@ -734,6 +806,7 @@ async function reclassifyHasilPrediksiAparatur(req, res, next) {
         faktorDominan: updated.faktorDominan,
         rekomendasiDetail: updated.rekomendasiDetail,
         rencanaIntervensi: updated.rencanaIntervensi,
+        ...common,
         dusun: updated.dusun,
         updatedAt: updated.updatedAt,
       },

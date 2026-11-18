@@ -50,6 +50,30 @@ function toTitleCaseRisk(statusRisiko) {
   return "Rendah";
 }
 
+function parseNullableNumber(value) {
+  if (value === undefined || value === null) return null;
+
+  const normalized = typeof value === "string" ? value.trim() : value;
+  if (normalized === "") return null;
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function classifyStatusTb(zScoreTb) {
+  if (zScoreTb < -3) return "Sangat Pendek";
+  if (zScoreTb < -2) return "Pendek";
+  if (zScoreTb <= 3) return "Normal";
+  return "Tinggi";
+}
+
+function classifyStatusBb(zScoreBb) {
+  if (zScoreBb < -3) return "Gizi Buruk";
+  if (zScoreBb < -2) return "Gizi Kurang";
+  if (zScoreBb <= 2) return "Gizi Baik";
+  return "Risiko Gizi Lebih";
+}
+
 function buildIntervensiList(statusRisiko) {
   if (statusRisiko === "TINGGI") {
     return [
@@ -105,32 +129,27 @@ function buildIntervensiList(statusRisiko) {
   ];
 }
 
-function estimateAnthropometry({ usiaBulan, tinggiBadan, beratBadan, statusRisiko }) {
+function estimateAnthropometry({ usiaBulan, tinggiBadan, beratBadan }) {
   const refTb = 50 + usiaBulan * 1.1;
   const refBb = 3.3 + usiaBulan * 0.28;
 
-  const tbVal =
-    tinggiBadan !== null && tinggiBadan !== undefined && !Number.isNaN(Number(tinggiBadan))
-      ? Number(tinggiBadan)
-      : null;
-  const bbVal =
-    beratBadan !== null && beratBadan !== undefined && !Number.isNaN(Number(beratBadan))
-      ? Number(beratBadan)
-      : null;
+  const tbVal = parseNullableNumber(tinggiBadan);
+  const bbVal = parseNullableNumber(beratBadan);
+  const hasUsia = Number.isFinite(Number(usiaBulan));
 
-  let zScoreTb = statusRisiko === "TINGGI" ? -2.4 : statusRisiko === "SEDANG" ? -1.4 : 0.1;
-  if (tbVal !== null) {
+  let zScoreTb = null;
+  let statusTb = null;
+  if (tbVal !== null && hasUsia) {
     zScoreTb = Number(((tbVal - refTb) / 3.5).toFixed(2));
+    statusTb = classifyStatusTb(zScoreTb);
   }
 
-  let zScoreBb = statusRisiko === "TINGGI" ? -1.9 : statusRisiko === "SEDANG" ? -1.2 : 0.2;
-  if (bbVal !== null) {
+  let zScoreBb = null;
+  let statusBb = null;
+  if (bbVal !== null && hasUsia) {
     zScoreBb = Number(((bbVal - refBb) / 1.2).toFixed(2));
+    statusBb = classifyStatusBb(zScoreBb);
   }
-
-  const statusTb =
-    zScoreTb <= -2.0 ? "Di Bawah Standar (Pendek)" : "Normal";
-  const statusBb = zScoreBb <= -1.5 ? "Kurang" : "Normal";
 
   return {
     tinggiBadan: tbVal,
@@ -630,7 +649,6 @@ function calculateDeterministicPrediction(fiturModel, antropometri = {}, dusun =
     usiaBulan,
     tinggiBadan,
     beratBadan,
-    statusRisiko,
   });
 
   return {
@@ -976,19 +994,8 @@ async function createPrediksi(req, res, next) {
         ? parseInt(body.beratLahirGram, 10)
         : null;
 
-    const tinggiBadan =
-      body.tinggiBadan !== undefined &&
-      body.tinggiBadan !== "" &&
-      !Number.isNaN(Number(body.tinggiBadan))
-        ? parseFloat(body.tinggiBadan)
-        : null;
-
-    const beratBadan =
-      body.beratBadan !== undefined &&
-      body.beratBadan !== "" &&
-      !Number.isNaN(Number(body.beratBadan))
-        ? parseFloat(body.beratBadan)
-        : null;
+    const tinggiBadan = parseNullableNumber(body.tinggiBadan);
+    const beratBadan = parseNullableNumber(body.beratBadan);
 
     // Validasi Field Utama
     const errors = {};
